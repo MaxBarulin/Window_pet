@@ -23,6 +23,7 @@ from pet import config as C  # noqa: E402
 from pet.behavior import Behavior, Pet, State  # noqa: E402
 from pet.desktop import FakeDesktop, Monitor, Rect  # noqa: E402
 from pet.poses import CLIPS  # noqa: E402
+from pet.kinematics import Skeleton  # noqa: E402
 from pet.rigmath import Rig  # noqa: E402
 from tools.render_preview import PilRenderer  # noqa: E402
 
@@ -70,6 +71,7 @@ def main() -> None:
 
     rig = Rig.load(ROOT / "assets" / "rig.json")
     ren = PilRenderer(rig)
+    skel = Skeleton(rig)
     settings = C.Settings(pet_height=args.height)
     desktop = FakeDesktop(
         [Monitor(SCREEN, Rect(SCREEN.x0, SCREEN.y0, SCREEN.x1, SCREEN.y1 - TASKBAR))],
@@ -93,12 +95,15 @@ def main() -> None:
         if p.last_event and (not events or events[-1] != p.last_event):
             events.append(p.last_event)
 
-        pose = CLIPS.get(p.clip, CLIPS["idle"]).at(p.clip_time)
+        spec = CLIPS.get(p.clip, CLIPS["idle"]).at(p.clip_time)
         anchor_y = p.y
         if p.anchor_kind == "hips":
-            anchor_y = p.y + (rig.ground[1] - rig.pivot("pelvis")[1]) * scale
+            pose = skel.resolve(spec)
+            probe = rig.compose(pose, (0.0, 0.0), scale, p.facing < 0)
+            hips = probe["pelvis"].apply(*rig.pivot("pelvis"))[1]
+            anchor_y = p.y - hips + skel.ground_y(probe)
 
-        layer = ren.draw(pose, (SCREEN.x1, SCREEN.y1), (p.x, anchor_y), scale,
+        layer = ren.draw(spec, (SCREEN.x1, SCREEN.y1), (p.x, anchor_y), scale,
                          flip=p.facing < 0)
         frame = backdrop.copy().convert("RGBA")
         frame.alpha_composite(layer)

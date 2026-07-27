@@ -51,9 +51,9 @@ class Settings:
 # --- physics, in px/s and px/s^2 at a reference pet height of 230 px --------
 GRAVITY = 1500.0
 TERMINAL_VY = 1900.0
-WALK_SPEED = 96.0            # scaled by clip speed
 JUMP_VY = -560.0
 STEP_UP_MAX = 42.0           # ledge lip he will hop up onto
+CLIMB_LUNGE = 2.4            # extra forward push when hopping onto one
 THROW_DAMPING = 0.55         # velocity kept when released from a drag
 BOUNCE = 0.0                 # landing is dead, no bounce
 
@@ -65,6 +65,7 @@ DURATIONS = {
     "sit_dance": (4.0, 9.0),
     "lean": (2.2, 4.5),
     "wave": (1.9, 1.9),
+    "crouch": (1.5, 1.5),
 }
 
 # desktop is re-read this often (seconds); EnumWindows is cheap but not free

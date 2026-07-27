@@ -59,7 +59,7 @@ def test_the_blocker_itself_works():
 
 def test_core_runtime_imports_without_numpy():
     r = _run("""
-        import pet.rigmath, pet.poses, pet.behavior, pet.desktop, pet.config
+        import pet.rigmath, pet.kinematics, pet.poses, pet.behavior, pet.desktop, pet.config
         print("ok")
     """)
     assert r.returncode == 0, r.stderr
@@ -68,11 +68,13 @@ def test_core_runtime_imports_without_numpy():
 
 def test_the_rig_can_be_posed_without_numpy():
     r = _run("""
-        from pet.rigmath import Rig, Pose
+        from pet.rigmath import Rig
+        from pet.kinematics import Skeleton
         from pet.poses import CLIPS
         rig = Rig.load("assets/rig.json")
-        clip = CLIPS["hiphop"]
-        tf = rig.compose(clip.at(0.3), (100.0, 400.0), 0.25, flip=True)
+        skel = Skeleton(rig)
+        pose = skel.resolve(CLIPS["hiphop"].at(0.3))
+        tf = rig.compose(pose, (100.0, 400.0), 0.25, flip=True)
         print(len(tf), round(rig.bounds(tf)[3], 2))
     """)
     assert r.returncode == 0, r.stderr

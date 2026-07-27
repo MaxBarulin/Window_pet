@@ -128,9 +128,39 @@ Two details are what make the joints hold up:
   wing, while material below it swings *inboard* and stays hidden. The arm pieces
   are clamped to start at the pivot line for exactly this reason.
 
-Animation lives in `pet/poses.py` as procedural clips — each is a function of phase
-returning joint angles, so motion is smooth at any frame rate. Angles are deltas on
-top of the rig's rest pose, which is what brings the arms down out of the T.
+### How the movement is built
+
+Animation lives in `pet/poses.py` as procedural clips — each is a function of phase,
+so motion is smooth at any frame rate. Crucially a clip does **not** return joint
+angles. It returns a `PoseSpec`: where the hips are and where each foot is planted.
+`pet/kinematics.py` then solves the two-bone chain hip → knee → ankle for the angles.
+
+That indirection is the difference between movement and twitching. Rotating joints
+directly means the feet slide, nothing is ever planted, and the body never carries
+its own weight — which is exactly what the first version looked like. A step is a
+foot that stays *still on the floor* while the body travels over it; a squat is hips
+going down with the feet where they were; a hop is the whole body leaving the
+ground. None of those can be stated as joint angles.
+
+Consequences worth knowing:
+
+* The photo has him standing with straight legs, i.e. at full reach, so a leg cannot
+  extend any further. Standing clips therefore sit `BASE_CROUCH` below that, leaving
+  the knees enough bend that the body can rise as well as fall.
+* His stride and his walking speed are tied to each other (`test_walk_speed_matches_
+  its_stride`), otherwise the planted foot skates.
+* Because the feet move independently, the point he stands on is no longer a fixed
+  spot in the artwork — `Skeleton.ground_y` finds the lower shoe of the current pose
+  and the renderer anchors *that* to the ledge.
+* Both leg pieces carry a round cap centred on the knee. A bent knee otherwise tears
+  a gap open on the outside of the joint, and simply overlapping square ends swaps
+  the gap for black corners poking out. A cap centred on the pivot has a silhouette
+  that does not change as the piece rotates, so it can neither tear nor protrude.
+* Nothing is ever squashed horizontally. Pinching him sideways to fake a turn read
+  as a rendering glitch rather than a spin, so the fake spin is gone.
+
+Arm angles are deltas on top of the rig's rest pose, which is what brings the arms
+down out of the T.
 
 The maths in `pet/rigmath.py` is pure Python on purpose. The rig only needs 2D
 affine transforms — a few 3×3 multiplies per frame — and the app used to reach for
@@ -160,7 +190,7 @@ The coordinates in `tools/build_assets.py` are specific to this photo — see
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest tests/ -q                        # 177 tests, no display needed
+python -m pytest tests/ -q                        # 222 tests, no display needed
 python -m pet                                     # run it
 
 python tools/render_preview.py --sheet clips.png  # every clip, as a contact sheet

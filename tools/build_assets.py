@@ -19,6 +19,7 @@ Coordinates are source pixels, measured off the matte (see tools/README.md).
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -100,23 +101,63 @@ PART_POLYS: dict[str, list[tuple[int, int]]] = {
     "arm_l_fore": [(254, 300), (254, 426), (0, 426), (0, 300)],
     "arm_r_upper": [(490, _ARM_TOP), (490, 426), (684, 426), (684, _ARM_TOP)],
     "arm_r_fore": [(628, 282), (628, 426), (896, 426), (896, 282)],
-    "thigh_l": [
-        (344, 690), (_LEG_SPLIT, 690), (_LEG_SPLIT, 800), (_LEG_SPLIT, 910),
-        (352, 910), (344, 800),
-    ],
-    "thigh_r": [
-        (_LEG_SPLIT, 690), (546, 690), (540, 800), (536, 910), (_LEG_SPLIT, 910),
-        (_LEG_SPLIT, 800),
-    ],
-    "shin_l": [
-        (348, 856), (_LEG_SPLIT, 856), (_LEG_SPLIT, 1000), (_LEG_SPLIT, 1140),
-        (330, 1140), (330, 1060), (340, 960),
-    ],
-    "shin_r": [
-        (_LEG_SPLIT, 856), (540, 856), (546, 960), (560, 1060), (560, 1140),
-        (_LEG_SPLIT, 1140), (_LEG_SPLIT, 1000),
-    ],
+    # legs are filled in below: their knee ends need arcs, not corners
 }
+
+# Radius of the round cap both leg pieces carry at the knee, in source px. It is a
+# little over half the leg's width there.
+KNEE_CAP = 48
+
+
+def _arc(cx: int, cy: int, r: int, a0: float, a1: float, steps: int = 14):
+    """Points along a circle, for a joint cap."""
+    return [
+        (
+            int(round(cx + r * math.cos(math.radians(a0 + (a1 - a0) * i / steps)))),
+            int(round(cy + r * math.sin(math.radians(a0 + (a1 - a0) * i / steps)))),
+        )
+        for i in range(steps + 1)
+    ]
+
+
+def _leg_polys() -> dict[str, list[tuple[int, int]]]:
+    """Thigh and shin, each capped with a disc centred on the knee.
+
+    A bent knee tears a gap open on the outside of the joint unless the two pieces
+    overlap across it - but overlapping them with square ends just swaps the gap
+    for black corners poking out as the shin swings, the same way square shoulders
+    sprouted wings. A cap centred exactly on the pivot has a silhouette that does
+    not change as the piece rotates, so it can neither tear nor protrude. The
+    overlap costs nothing visually because the trousers are flat black.
+    """
+    out: dict[str, list[tuple[int, int]]] = {}
+    for side, (kx, ky) in (("l", JOINTS["knee_l"]), ("r", JOINTS["knee_r"])):
+        inner = _LEG_SPLIT
+        outer = 344 if side == "l" else 546
+        # thigh: hip down to a cap bulging below the knee
+        thigh = [(min(outer, inner), 690), (max(outer, inner), 690)]
+        if side == "l":
+            thigh = [(344, 690), (inner, 690), (inner, ky - 4)]
+            thigh += _arc(kx, ky, KNEE_CAP, 0, 180)
+            thigh += [(344, ky - 4)]
+        else:
+            thigh = [(inner, 690), (546, 690), (546, ky - 4)]
+            thigh += _arc(kx, ky, KNEE_CAP, 0, 180)[::-1]
+            thigh += [(inner, ky - 4)]
+        out[f"thigh_{side}"] = thigh
+
+        # shin: a cap bulging above the knee, then down to the shoe
+        shin = _arc(kx, ky, KNEE_CAP, 180, 360)
+        if side == "l":
+            shin += [(inner, 1000), (inner, 1140), (330, 1140), (330, 1060), (340, 960)]
+        else:
+            shin += [(546, 960), (560, 1060), (560, 1140), (inner, 1140), (inner, 1000)]
+            shin = shin[::-1]
+        out[f"shin_{side}"] = shin
+    return out
+
+
+PART_POLYS.update(_leg_polys())
 
 # name -> (parent, pivot joint, draw order). Lower z draws first, so both arms sit
 # behind the torso and the shirt covers each shoulder pivot.

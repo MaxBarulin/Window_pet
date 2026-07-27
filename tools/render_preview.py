@@ -18,8 +18,9 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from pet.kinematics import Skeleton  # noqa: E402
 from pet.poses import CLIPS  # noqa: E402
-from pet.rigmath import Rig, translate  # noqa: E402
+from pet.rigmath import Pose, Rig, translate  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 RIG_JSON = ROOT / "assets" / "rig.json"
@@ -30,14 +31,21 @@ class PilRenderer:
 
     def __init__(self, rig: Rig):
         self.rig = rig
+        self.skeleton = Skeleton(rig)
         self.images = {
             name: Image.open(rig.part_file(name)).convert("RGBA")
             for name in rig.parts
         }
 
-    def draw(self, pose, size, anchor, scale, flip=False) -> Image.Image:
+    def draw(self, spec, size, anchor, scale, flip=False) -> Image.Image:
+        """`spec` is a PoseSpec; the feet of the resolved pose land on `anchor`."""
         canvas = Image.new("RGBA", size, (0, 0, 0, 0))
-        transforms = self.rig.compose(pose, anchor, scale, flip)
+        pose = self.skeleton.resolve(spec) if not isinstance(spec, Pose) else spec
+        probe = self.rig.compose(pose, (0.0, 0.0), scale, flip)
+        contact = self.skeleton.ground_y(probe)
+        transforms = self.rig.compose(
+            pose, (anchor[0], anchor[1] - contact), scale, flip
+        )
         for name in self.rig.draw_order:
             ox, oy = self.rig.parts[name]["offset"]
             forward = transforms[name] @ translate(ox, oy)

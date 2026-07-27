@@ -23,6 +23,7 @@ class State(Enum):
     IDLE = "idle"
     WALK = "walk"
     DANCE = "dance"
+    CROUCH = "crouch"
     SIT_DANCE = "sit_dance"
     LEAN = "lean"
     WAVE = "wave"
@@ -81,11 +82,20 @@ class Behavior:
             limit = self.rng.uniform(lo, hi)
         p.state_limit = limit
 
-    def _start_fall(self, reason: str) -> None:
+    def _start_fall(self, reason: str, clip: str = "fall") -> None:
         self.pet.airborne = True
         self.pet.ledge = None
         self.pet.last_event = reason
-        self._set_state(State.FALL, "fall", limit=999.0)
+        self._set_state(State.FALL, clip, limit=999.0)
+
+    def hop(self) -> None:
+        """A standing jump: straight up, landing back where he took off."""
+        p = self.pet
+        if p.airborne:
+            return
+        p.vy = C.JUMP_VY * self.scale
+        p.vx = 0.0
+        self._start_fall("hopped", clip="jump_air")
 
     # -- decisions ---------------------------------------------------------
 
@@ -104,7 +114,10 @@ class Behavior:
         )
 
         # dancing is the point of him, so it outweighs wandering and idling
-        options: list[tuple[str, float]] = [("walk", 2.4), ("dance", 6.0), ("idle", 0.8)]
+        options: list[tuple[str, float]] = [
+            ("walk", 2.4), ("dance", 6.0), ("idle", 0.8),
+            ("crouch", 1.0), ("hop", 1.2),
+        ]
         if on_window:
             options.append(("sit_dance", 3.2 if near_ledge_edge else 1.4))
         if near_wall:
@@ -126,6 +139,11 @@ class Behavior:
             self._set_state(State.WALK, "walk")
         elif choice == "dance":
             self._set_state(State.DANCE, self.rng.choice(DANCES))
+        elif choice == "crouch":
+            self._set_state(State.CROUCH, "crouch",
+                            limit=CLIPS["crouch"].duration)
+        elif choice == "hop":
+            self.hop()
         elif choice == "sit_dance":
             self._set_state(State.SIT_DANCE, "sit_dance")
         elif choice == "lean":
@@ -154,7 +172,9 @@ class Behavior:
     def _walk_step(self, snap: Snapshot, dt: float) -> None:
         p = self.pet
         lg = p.ledge
-        speed = C.WALK_SPEED * CLIPS["walk"].speed / 0.42 * self.scale
+        # exactly the travel his stride is authored for, so the planted foot does
+        # not skate along the floor
+        speed = CLIPS["walk"].speed * self.settings.pet_height
         nx = p.x + p.facing * speed * dt
         wall_lo, wall_hi = snap.walk_span(p.x, p.y)
         margin = self._half_width()
@@ -177,7 +197,8 @@ class Behavior:
                 # small lip: hop up onto the window
                 p.last_event = "climbed onto window"
                 p.vy = C.JUMP_VY * self.scale
-                p.vx = p.facing * speed
+                # a walking pace alone will not carry him over the lip
+                p.vx = p.facing * speed * C.CLIMB_LUNGE
                 self.pet.airborne = True
                 self.pet.ledge = None
                 self._set_state(State.FALL, "fall", limit=999.0)

@@ -198,8 +198,15 @@ def test_every_pose_fits_the_fixed_canvas(app, rig):
     for name in CLIPS:
         for i in range(12):
             pose = CLIPS[name].at(CLIPS[name].duration * i / 12)
+            resolved = win.skeleton.resolve(pose)
             for flip in (False, True):
-                tf = rig.compose(pose, win._anchor_local, 240 / rig.height(), flip)
+                probe = rig.compose(resolved, (0.0, 0.0), 240 / rig.height(), flip)
+                contact = win.skeleton.ground_y(probe)
+                tf = rig.compose(
+                    resolved,
+                    (win._anchor_local[0], win._anchor_local[1] - contact),
+                    240 / rig.height(), flip,
+                )
                 x0, y0, x1, y1 = rig.bounds(tf)
                 assert x0 >= -0.5 and y0 >= -0.5, (name, i, flip, x0, y0)
                 assert x1 <= w + 0.5 and y1 <= h + 0.5, (name, i, flip, x1, y1)

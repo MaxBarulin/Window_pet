@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 from . import config as C
 from .behavior import Behavior, Pet, State
 from .desktop import Snapshot, make_desktop
+from .kinematics import Skeleton
 from .poses import CLIPS
 from .rigmath import Matrix, Pose, Rig
 
@@ -114,6 +115,7 @@ class PetWindow(QWidget):
         self.pixmaps = {
             name: QPixmap(str(rig.part_file(name))) for name in rig.parts
         }
+        self.skeleton = Skeleton(rig)
         self.behavior = Behavior(Pet(), settings=settings)
         self.desktop = make_desktop()
         self.poller = DesktopPoller(self.desktop, C.DESKTOP_POLL)
@@ -171,9 +173,12 @@ class PetWindow(QWidget):
         left = right = top = bottom = 0.0
         for clip in CLIPS.values():
             for i in range(8):
-                pose = clip.at(clip.duration * i / 8)
+                pose = self.skeleton.resolve(clip.at(clip.duration * i / 8))
                 tf = self.rig.compose(pose, (0.0, 0.0), scale, flip=False)
+                # measure from the pose's own feet, which is what gets anchored
+                foot = self.skeleton.ground_y(tf)
                 x0, y0, x1, y1 = self.rig.bounds(tf)
+                y0, y1 = y0 - foot, y1 - foot
                 left, right = min(left, x0), max(right, x1)
                 top, bottom = min(top, y0), max(bottom, y1)
         half = max(abs(left), abs(right)) + PAD
@@ -227,7 +232,7 @@ class PetWindow(QWidget):
     def _current_pose(self) -> Pose:
         p = self.behavior.pet
         clip = CLIPS.get(p.clip, CLIPS["idle"])
-        return clip.at(p.clip_time)
+        return self.skeleton.resolve(clip.at(p.clip_time))
 
     def _render(self) -> None:
         p = self.behavior.pet
@@ -235,11 +240,15 @@ class PetWindow(QWidget):
         scale = self.settings.pet_height / self.rig.height()
         flip = p.facing < 0
 
-        anchor_y = p.y
+        # Where he actually touches down depends on the pose now that the feet are
+        # driven independently, so ask the pose rather than using a fixed point.
+        probe = self.rig.compose(pose, (0.0, 0.0), scale, flip)
         if p.anchor_kind == "hips":
-            # sitting: hips rest on the ledge, so the feet hang below it
-            hips_y = self.rig.pivot("pelvis")[1]
-            anchor_y = p.y + (self.rig.ground[1] - hips_y) * scale
+            # sitting: hips rest on the ledge and the legs hang below it
+            contact = probe["pelvis"].apply(*self.rig.pivot("pelvis"))[1]
+        else:
+            contact = self.skeleton.ground_y(probe)
+        anchor_y = p.y - contact
 
         ax, ay = self._anchor_local
         # keep the fraction of a pixel in the drawing, not in the window position,
