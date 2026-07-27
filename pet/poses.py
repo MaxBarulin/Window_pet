@@ -46,6 +46,10 @@ SQUAT_DEPTH = 62.0    # hips at the bottom of a full squat. A flat rig can only
                       # as a frog.
 BOUNCE = 30.0         # hips at the bottom of a dance bounce
 SIDE_STEP = 68.0      # how far a side step travels
+KAZACHOK_DEPTH = 104.0  # how low the squat dance sits
+KICK_REACH = 168.0      # how far the kicking leg shoots out. The leg is 328
+                        # long, so from this depth it can reach about 250 -
+                        # this leaves headroom rather than snapping straight.
 
 
 def _sin(phase: float, freq: float = 1.0, off: float = 0.0) -> float:
@@ -221,8 +225,42 @@ def _step_touch(p: float) -> PoseSpec:
     )
 
 
-def _goat_hop(p: float) -> PoseSpec:
-    """Daft little two-footed hops, knees snapping up in turn.
+def _kazachok(p: float) -> PoseSpec:
+    """The Russian squat dance: down on the haunches, legs shot out in turn.
+
+    Only expressible now that the legs are driven by where the feet are. The body
+    stays low the whole time while one foot fires out and the other stays tucked
+    under him carrying the weight - which is the entire look of the step.
+
+    From a front-facing cutout the kick has to go out sideways: a kick straight
+    forward would foreshorten to nothing.
+    """
+    kick = _sin(p)                       # -1 kicks the left leg, +1 the right
+    beat = _dip(p, 2.0)
+    left = max(0.0, -kick)
+    right = max(0.0, kick)
+    return PoseSpec(
+        # weight shifts onto whichever leg is still under him
+        body=(-18.0 * kick, BASE_CROUCH + KAZACHOK_DEPTH - 10.0 * beat),
+        lean=5.0 * kick,
+        torso=-4.0 * kick,
+        head=7.0 * kick - 4.0 * beat,
+        # arms folded in, opening out on the side that kicks
+        arm_l_upper=34.0 + 44.0 * left,
+        arm_l_fore=52.0 - 24.0 * left,
+        arm_r_upper=-34.0 - 44.0 * right,
+        arm_r_fore=-52.0 + 24.0 * right,
+        # The kicking heel stays down and slides out along the floor - that is
+        # what the step actually looks like, and lifting the foot instead just
+        # reads as tucking it up underneath him. The other foot tucks in to
+        # carry the weight.
+        foot_l=(-KICK_REACH * left + 34.0 * right, -6.0 * left),
+        foot_r=(KICK_REACH * right - 34.0 * left, -6.0 * right),
+    )
+
+
+def _hop_step(p: float) -> PoseSpec:
+    """Two-footed hops, knees snapping up in turn.
 
     Anticipation crouch, push off, tuck, land and absorb - the whole hop is in the
     body height, which is why it reads as a hop rather than a leg twitch.
@@ -445,7 +483,8 @@ CLIPS: dict[str, Clip] = {
     "crouch": Clip("crouch", 1.5, _crouch),
     "hiphop": Clip("hiphop", 1.15, _hiphop),
     "step_touch": Clip("step_touch", 1.8, _step_touch),
-    "goat_hop": Clip("goat_hop", 0.92, _goat_hop),
+    "kazachok": Clip("kazachok", 1.25, _kazachok),
+    "hop_step": Clip("hop_step", 0.92, _hop_step),
     "shimmy": Clip("shimmy", 1.6, _shimmy),
     "contemporary": Clip("contemporary", 3.4, _contemporary),
     "sit_dance": Clip("sit_dance", 1.5, _sit_dance),
@@ -457,7 +496,8 @@ CLIPS: dict[str, Clip] = {
     "dragged": Clip("dragged", 1.4, _dragged),
 }
 
-DANCES = ("hiphop", "step_touch", "goat_hop", "shimmy", "contemporary")
+DANCES = ("hiphop", "step_touch", "kazachok", "hop_step", "shimmy",
+          "contemporary")
 
 
 def random_dance(rng: random.Random | None = None) -> str:

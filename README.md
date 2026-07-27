@@ -190,7 +190,7 @@ The coordinates in `tools/build_assets.py` are specific to this photo — see
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest tests/ -q                        # 222 tests, no display needed
+python -m pytest tests/ -q                        # 229 tests, no display needed
 python -m pet                                     # run it
 
 python tools/render_preview.py --sheet clips.png  # every clip, as a contact sheet

@@ -92,7 +92,7 @@ def test_looping_clips_join_up(name: str, skel: Skeleton):
 
 # A hop launch and an impact absorb are *meant* to snap; everything else moving
 # that fast would read as a glitch.
-_IMPULSIVE = {"goat_hop", "land", "jump_air"}
+_IMPULSIVE = {"hop_step", "land", "jump_air"}
 
 
 @pytest.mark.parametrize("name", sorted(CLIPS))
@@ -201,8 +201,8 @@ def test_crouch_actually_bends_the_knees(skel: Skeleton):
 
 
 def test_hop_leaves_the_floor(skel: Skeleton, rig: Rig):
-    """goat_hop must be a hop: both feet off the ground at the same time."""
-    clip = CLIPS["goat_hop"]
+    """hop_step must be a hop: both feet off the ground at the same time."""
+    clip = CLIPS["hop_step"]
     lowest = []
     for i in range(48):
         spec = clip.at(clip.duration * i / 48)
@@ -215,7 +215,7 @@ def test_hop_leaves_the_floor(skel: Skeleton, rig: Rig):
 
 def test_hop_crouches_before_it_launches(skel: Skeleton):
     """Anticipation: nobody jumps without dipping first."""
-    clip = CLIPS["goat_hop"]
+    clip = CLIPS["hop_step"]
     early = [clip.at(clip.duration * p).body[1] for p in (0.0, 0.08, 0.16, 0.22)]
     assert max(early) > early[0] + 10.0, "no anticipation dip before the hop"
 
@@ -290,6 +290,30 @@ def test_random_dance_only_returns_dances():
     for _ in range(50):
         assert random_dance(rng) in DANCES
         assert random_dance(rng) in CLIPS
+
+
+def test_kazachok_stays_low_and_kicks_out(skel: Skeleton, rig: Rig):
+    """The squat dance: down the whole time, one leg shot out, the other tucked."""
+    clip = CLIPS["kazachok"]
+    specs = sample(clip, 40)
+
+    # he never stands back up mid-step
+    assert min(s.body[1] for s in specs) > BASE_CROUCH + 60.0
+
+    # each leg gets thrown well clear of the other at some point
+    assert min(s.foot_l[0] for s in specs) < -100.0
+    assert max(s.foot_r[0] for s in specs) > 100.0
+
+    # and they take turns rather than both going at once
+    assert not [s for s in specs if s.foot_l[0] < -60 and s.foot_r[0] > 60]
+
+    # one foot always stays down carrying him
+    for spec in specs:
+        planted = min(
+            abs(foot_world(skel, rig, spec, side)[1] - skel.legs[side].ankle[1])
+            for side in ("l", "r")
+        )
+        assert planted < 14.0, "no foot left carrying his weight"
 
 
 def test_the_fake_spin_is_gone():
