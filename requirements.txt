@@ -1,0 +1,3 @@
+# Runtime: this is all the pet itself needs.
+PySide6-Essentials>=6.6,<7
+numpy>=1.24

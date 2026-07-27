@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.spec.bak
+.pytest_cache/
+*.gif
+clips.png
+demo.gif

@@ -1,0 +1,4 @@
+# Build-time and test-time only; none of this ships in the exe.
+pytest>=8.0
+Pillow>=10.0          # asset cutting and the offline preview renderer
+scipy>=1.11            # morphology used by tools/build_assets.py
