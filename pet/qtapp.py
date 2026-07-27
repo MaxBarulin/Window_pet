@@ -13,7 +13,6 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
@@ -38,17 +37,17 @@ from . import config as C
 from .behavior import Behavior, Pet, State
 from .desktop import Snapshot, make_desktop
 from .poses import CLIPS
-from .rigmath import Rig
+from .rigmath import Matrix, Rig
 
 PAD = 6  # px of slack around his bounding box
 
 
-def _qtransform(m: np.ndarray) -> QTransform:
-    """3x3 row-vector-free matrix -> QTransform (which is transposed)."""
+def _qtransform(m: Matrix) -> QTransform:
+    """Our affine transform -> QTransform, which is stored transposed."""
     return QTransform(
-        m[0, 0], m[1, 0],
-        m[0, 1], m[1, 1],
-        m[0, 2], m[1, 2],
+        m.a, m.d,
+        m.b, m.e,
+        m.c, m.f,
     )
 
 
@@ -188,11 +187,8 @@ class PetWindow(QWidget):
         )
         ox, oy = PAD - bx0, PAD - by0
         for name in self.rig.draw_order:
-            m = tf0[name].copy()
-            m[0, 2] += ox
-            m[1, 2] += oy
             px, py = self.rig.parts[name]["offset"]
-            t = _qtransform(m)
+            t = _qtransform(tf0[name].translated(ox, oy))
             painter.setTransform(QTransform.fromTranslate(px, py) * t)
             painter.drawPixmap(0, 0, self.pixmaps[name])
         painter.end()

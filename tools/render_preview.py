@@ -19,7 +19,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pet.poses import CLIPS  # noqa: E402
-from pet.rigmath import Rig  # noqa: E402
+from pet.rigmath import Rig, translate  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 RIG_JSON = ROOT / "assets" / "rig.json"
@@ -39,14 +39,13 @@ class PilRenderer:
         canvas = Image.new("RGBA", size, (0, 0, 0, 0))
         transforms = self.rig.compose(pose, anchor, scale, flip)
         for name in self.rig.draw_order:
-            m = transforms[name]
             ox, oy = self.rig.parts[name]["offset"]
-            forward = m @ np.array([[1, 0, ox], [0, 1, oy], [0, 0, 1]], float)
+            forward = transforms[name] @ translate(ox, oy)
             try:
-                inv = np.linalg.inv(forward)
-            except np.linalg.LinAlgError:
+                # Pillow maps output -> input, so it wants the inverse
+                coeffs = forward.inverse().coeffs()
+            except ZeroDivisionError:
                 continue  # fully squashed away, e.g. mid spin
-            coeffs = (inv[0, 0], inv[0, 1], inv[0, 2], inv[1, 0], inv[1, 1], inv[1, 2])
             layer = self.images[name].transform(
                 size, Image.AFFINE, coeffs, resample=Image.BICUBIC
             )

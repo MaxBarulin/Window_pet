@@ -1,10 +1,19 @@
 import math
 from pathlib import Path
 
-import numpy as np
 import pytest
 
-from pet.rigmath import Pose, Rig, about, apply, rotate, scale, translate
+from pet.rigmath import (
+    Matrix,
+    Pose,
+    Rig,
+    about,
+    apply,
+    identity,
+    rotate,
+    scale,
+    translate,
+)
 
 RIG_JSON = Path(__file__).resolve().parent.parent / "assets" / "rig.json"
 
@@ -35,6 +44,51 @@ def test_limb_below_pivot_swings_left_for_positive_angle():
     m = about(rotate(30), 0, 0)
     x, y = apply(m, 0, 100)
     assert x < 0 and y > 0
+
+
+def test_matrix_composition_applies_right_hand_side_first():
+    m = translate(10, 0) @ scale(2.0)
+    assert m.apply(3, 0) == pytest.approx((16.0, 0.0))   # scale, then translate
+    m2 = scale(2.0) @ translate(10, 0)
+    assert m2.apply(3, 0) == pytest.approx((26.0, 0.0))  # translate, then scale
+
+
+def test_matrix_inverse_round_trips():
+    for m in (
+        translate(13, -7),
+        scale(2.0, 0.5),
+        rotate(37),
+        translate(50, 60) @ rotate(-24) @ scale(1.3, 0.8),
+        scale(-1.0, 1.0),          # the horizontal flip
+    ):
+        back = m.inverse()
+        assert (m @ back).approx(identity(), tol=1e-9)
+        for x, y in ((0, 0), (12, -5), (300, 900)):
+            assert back.apply(*m.apply(x, y)) == pytest.approx((x, y), abs=1e-6)
+
+
+def test_singular_matrix_reports_rather_than_returning_nonsense():
+    with pytest.raises(ZeroDivisionError):
+        scale(0.0, 1.0).inverse()
+
+
+def test_translated_only_shifts():
+    m = rotate(20) @ scale(1.4)
+    moved = m.translated(5, -9)
+    x0, y0 = m.apply(11, 3)
+    assert moved.apply(11, 3) == pytest.approx((x0 + 5, y0 - 9))
+
+
+def test_coeffs_order_matches_pillow_affine():
+    m = Matrix(1, 2, 3, 4, 5, 6)
+    assert m.coeffs() == (1, 2, 3, 4, 5, 6)
+    assert m.apply(1, 1) == pytest.approx((1 + 2 + 3, 4 + 5 + 6))
+
+
+def test_determinant_flips_sign_when_mirrored():
+    assert scale(2.0, 3.0).determinant == pytest.approx(6.0)
+    assert scale(-1.0, 1.0).determinant == pytest.approx(-1.0)
+    assert rotate(31).determinant == pytest.approx(1.0)
 
 
 def test_rig_loads_with_one_root_and_full_hierarchy(rig: Rig):
@@ -88,7 +142,7 @@ def test_zero_pose_with_no_rest_is_identity():
                         "pivot": [5, 5], "pivot_src": [5, 5], "parent": None, "z": 0}},
     }
     tf = Rig(data, Path(".")).world_transforms(Pose())
-    assert np.allclose(tf["a"], np.eye(3))
+    assert tf["a"].approx(identity())
 
 
 def test_child_inherits_parent_rotation(rig: Rig):
@@ -96,7 +150,7 @@ def test_child_inherits_parent_rotation(rig: Rig):
     head_pivot = rig.joints["neck"]
     still = apply(rig.world_transforms(Pose())["head"], *head_pivot)
     turned = apply(rig.world_transforms(Pose(angles={"torso": 25.0}))["head"], *head_pivot)
-    assert not np.allclose(still, turned)
+    assert still != pytest.approx(turned, abs=1e-6)
 
 
 def test_compose_puts_the_ground_point_on_the_anchor(rig: Rig):

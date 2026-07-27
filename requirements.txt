@@ -1,3 +1,6 @@
 # Runtime: this is all the pet itself needs.
+#
+# Deliberately no numpy. It was only ever used for 3x3 affine maths, and its C
+# extensions failed to load inside the frozen exe on a real machine. The rig now
+# does that maths in pure Python; see pet/rigmath.py.
 PySide6-Essentials>=6.6,<7
-numpy>=1.24

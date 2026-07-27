@@ -15,15 +15,37 @@ python -m pet
 
 ## Getting the .exe
 
-Every push builds a standalone one-file `WindowPet.exe` on `windows-latest`:
+Every push builds on `windows-latest` and publishes two artifacts:
+
+| Artifact | What it is |
+| --- | --- |
+| **WindowPet-exe** | One file, `WindowPet.exe`. Start here. |
+| **WindowPet-folder** | A folder containing `WindowPet.exe` plus its DLLs. The fallback. |
 
 1. Open the **Actions** tab → the newest **build** run.
-2. Download the **WindowPet-exe** artifact.
+2. Download an artifact from the bottom of the page.
 3. Unzip and run `WindowPet.exe`. No Python needed.
 
-The build also runs the test suite first and refuses to publish an exe that is
-missing its assets. Nothing is cross-compiled — PyInstaller cannot do that, so the
-exe genuinely comes from a Windows runner.
+Use the one-folder build if the one-file build will not start. A one-file exe
+unpacks itself into `%TEMP%` on every launch, and antivirus or a locked-down temp
+directory can interfere with the extracted DLLs; the one-folder build has nothing
+to unpack.
+
+Both are smoke-tested in CI — actually launched and left running for 20 seconds —
+and the build refuses to publish an exe that is missing its assets. Nothing is
+cross-compiled: PyInstaller cannot do that, so these come from a real Windows
+runner.
+
+### If it will not start
+
+The exe is built without a console, so Windows shows only a truncated dialog. The
+full traceback is written to:
+
+```
+%APPDATA%\WindowPet\crash.log
+```
+
+Send that file — it names the actual failure.
 
 ## Controls
 
@@ -91,6 +113,14 @@ Animation lives in `pet/poses.py` as procedural clips — each is a function of 
 returning joint angles, so motion is smooth at any frame rate. Angles are deltas on
 top of the rig's rest pose, which is what brings the arms down out of the T.
 
+The maths in `pet/rigmath.py` is pure Python on purpose. The rig only needs 2D
+affine transforms — a few 3×3 multiplies per frame — and the app used to reach for
+numpy to do it. That cost ~40 MB in the exe and, worse, dragged in C extensions
+that failed to load on a real machine (`Importing the numpy C-extensions failed`),
+killing the app at startup. The asset tools still use numpy; the runtime does not,
+and `tests/test_packaging.py` imports the whole runtime with numpy hard-blocked to
+keep it that way.
+
 ### Using a different photo
 
 Best results come from a front-facing, evenly lit, full-body T-pose on a plain
@@ -111,7 +141,7 @@ The coordinates in `tools/build_assets.py` are specific to this photo — see
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest tests/ -q                                  # 140 tests, no display needed
+python -m pytest tests/ -q                        # 158 tests, no display needed
 python -m pet                                     # run it
 
 python tools/render_preview.py --sheet clips.png  # every clip, as a contact sheet

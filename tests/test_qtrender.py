@@ -60,7 +60,7 @@ def test_qtransform_matches_numpy(m):
 def test_qtransform_is_not_accidentally_symmetric():
     """A transposed-but-symmetric test matrix would hide the bug above."""
     m = rotate(30)
-    assert not np.allclose(m[:2, :2], m[:2, :2].T)
+    assert m.b != pytest.approx(m.d), "rotation must have asymmetric off-diagonals"
 
 
 def _window(app, rig, **kw) -> PetWindow:
