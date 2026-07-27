@@ -181,6 +181,60 @@ def _playful(p: float) -> Pose:
     )
 
 
+def _goat_hop(p: float) -> Pose:
+    """Daft little side-to-side hop, knees snapping up in turn.
+
+    The silliest thing the rig can do without the joints going rubbery: the knee
+    lift does the work, so the arms can stay loose rather than flailing.
+    """
+    hop = _bounce(p, 2.0)
+    side = _sin(p)
+    lift = max(0.0, _sin(p, 2.0))
+    lift_other = max(0.0, -_sin(p, 2.0))
+    return Pose(
+        angles={
+            "pelvis": 7.0 * side,
+            "torso": -6.0 * side,
+            "head": 10.0 * side - 4.0 * hop,
+            "arm_l_upper": 30.0 + 18.0 * lift,
+            "arm_l_fore": 34.0 + 16.0 * lift,
+            "arm_r_upper": -30.0 - 18.0 * lift_other,
+            "arm_r_fore": -34.0 - 16.0 * lift_other,
+            # one knee up, then the other
+            "thigh_l": 26.0 * lift,
+            "shin_l": -38.0 * lift,
+            "thigh_r": -26.0 * lift_other,
+            "shin_r": -38.0 * lift_other,
+        },
+        offset=(9.0 * side, -13.0 * hop),
+        squash=(1.0 + 0.04 * (1 - hop), 1.0 - 0.05 * (1 - hop)),
+    )
+
+
+def _shimmy(p: float) -> Pose:
+    """Fast shoulder shimmy with a low bounce - reads as showing off."""
+    shake = _sin(p, 4.0)
+    bounce = _bounce(p, 4.0)
+    sway = _sin(p)
+    return Pose(
+        angles={
+            "pelvis": 5.0 * sway,
+            "torso": 7.0 * shake,
+            "head": -9.0 * shake + 3.0 * sway,
+            "arm_l_upper": 38.0 + 14.0 * shake,
+            "arm_l_fore": 40.0 - 12.0 * shake,
+            "arm_r_upper": -38.0 + 14.0 * shake,
+            "arm_r_fore": -40.0 - 12.0 * shake,
+            "thigh_l": 7.0 * sway,
+            "shin_l": -12.0 * bounce,
+            "thigh_r": -7.0 * sway,
+            "shin_r": -12.0 * (1.0 - bounce),
+        },
+        offset=(3.0 * sway, -6.0 * bounce),
+        squash=(1.0 + 0.025 * (1 - bounce), 1.0 - 0.035 * (1 - bounce)),
+    )
+
+
 def _spin_step(p: float) -> Pose:
     """A cheeky pivot: narrows at the halfway point to suggest a turn.
 
@@ -342,6 +396,8 @@ CLIPS: dict[str, Clip] = {
     "hiphop": Clip("hiphop", 1.15, _hiphop),
     "contemporary": Clip("contemporary", 3.4, _contemporary),
     "playful": Clip("playful", 0.95, _playful),
+    "goat_hop": Clip("goat_hop", 1.0, _goat_hop),
+    "shimmy": Clip("shimmy", 1.6, _shimmy),
     "spin_step": Clip("spin_step", 1.6, _spin_step),
     "sit_dance": Clip("sit_dance", 1.5, _sit_dance),
     "lean": Clip("lean", 2.8, _lean),
@@ -351,7 +407,7 @@ CLIPS: dict[str, Clip] = {
     "dragged": Clip("dragged", 1.4, _dragged),
 }
 
-DANCES = ("hiphop", "contemporary", "playful", "spin_step")
+DANCES = ("hiphop", "contemporary", "playful", "goat_hop", "shimmy", "spin_step")
 
 
 def random_dance(rng: random.Random | None = None) -> str:

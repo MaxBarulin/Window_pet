@@ -169,6 +169,70 @@ def test_hit_testing_finds_his_body_but_not_the_corner(app, rig):
     assert not win._opaque_at(QPoint(10**6, 10**6))
 
 
+def test_the_window_is_only_ever_moved_never_resized(app, rig):
+    """This is the stutter fix.
+
+    Resizing a translucent always-on-top window every frame judders visibly. The
+    canvas is sized once for the widest pose, and frames only move it.
+    """
+    win = _window(app, rig, pet_height=240)
+    sizes = set()
+    positions = set()
+    for name in CLIPS:
+        win.behavior.pet.clip = name
+        for i in range(8):
+            win.behavior.pet.clip_time = CLIPS[name].duration * i / 8
+            win.behavior.pet.x += 3.5
+            win._render()
+            g = win.geometry()
+            sizes.add((g.width(), g.height()))
+            positions.add((g.left(), g.top()))
+    assert len(sizes) == 1, f"window resized while animating: {sorted(sizes)}"
+    assert len(positions) > 10, "window should still follow him around"
+
+
+def test_every_pose_fits_the_fixed_canvas(app, rig):
+    """A pose reaching outside the canvas would be clipped mid-dance."""
+    win = _window(app, rig, pet_height=240)
+    w, h = win._canvas
+    for name in CLIPS:
+        for i in range(12):
+            pose = CLIPS[name].at(CLIPS[name].duration * i / 12)
+            for flip in (False, True):
+                tf = rig.compose(pose, win._anchor_local, 240 / rig.height(), flip)
+                x0, y0, x1, y1 = rig.bounds(tf)
+                assert x0 >= -0.5 and y0 >= -0.5, (name, i, flip, x0, y0)
+                assert x1 <= w + 0.5 and y1 <= h + 0.5, (name, i, flip, x1, y1)
+
+
+def test_sub_pixel_movement_shifts_the_drawing(app, rig):
+    """Rounding position to whole pixels makes slow walking crawl."""
+    win = _window(app, rig, pet_height=240)
+    win.behavior.pet.clip = "idle"
+    win.behavior.pet.clip_time = 0.0
+    win.behavior.pet.x = 600.0
+    win._render()
+    before = _alpha(win._frame).astype(float)
+    win.behavior.pet.x = 600.4          # same whole pixel, different fraction
+    win._render()
+    after = _alpha(win._frame).astype(float)
+    import math
+
+    # the window itself has not moved: 600.0 and 600.4 floor to the same pixel...
+    assert win.geometry().left() == math.floor(600.4 - win._anchor_local[0])
+    # ...so the 0.4px has to show up in the drawing instead
+    assert abs(after - before).sum() > 0, "sub-pixel motion was rounded away"
+
+
+def test_canvas_is_resized_when_the_pet_size_changes(app, rig):
+    win = _window(app, rig, pet_height=150)
+    small = win._canvas
+    win.set_height(330)
+    assert win._canvas[0] > small[0] and win._canvas[1] > small[1]
+    win._render()
+    assert (win.geometry().width(), win.geometry().height()) == win._canvas
+
+
 def test_paint_before_first_render_is_harmless(app, rig):
     win = PetWindow(rig, C.Settings())
     assert win._frame is None

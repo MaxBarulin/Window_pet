@@ -196,7 +196,9 @@ def test_dance_now_picks_a_dance_on_the_ground():
     b = beh(x=500, y=1040, airborne=False)
     b.dance_now()
     assert b.pet.state is State.DANCE
-    assert b.pet.clip in ("hiphop", "contemporary", "playful", "spin_step")
+    from pet.poses import DANCES
+
+    assert b.pet.clip in DANCES
 
 
 def test_dance_now_is_ignored_mid_air():

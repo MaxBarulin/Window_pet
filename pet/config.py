@@ -16,7 +16,7 @@ def settings_path() -> Path:
 @dataclass
 class Settings:
     pet_height: int = 230          # on-screen height in px
-    fps: int = 30
+    fps: int = 60
     click_through: bool = False    # ignore the mouse entirely
     always_on_top: bool = True
     walk_on_windows: bool = True   # treat window title bars as ledges
@@ -59,9 +59,9 @@ BOUNCE = 0.0                 # landing is dead, no bounce
 
 # how long each idle-time behaviour lasts, in seconds (min, max)
 DURATIONS = {
-    "idle": (1.4, 3.6),
+    "idle": (1.2, 2.6),
     "walk": (1.8, 5.5),
-    "dance": (3.0, 7.5),
+    "dance": (4.5, 9.0),
     "sit_dance": (4.0, 9.0),
     "lean": (2.2, 4.5),
     "wave": (1.9, 1.9),

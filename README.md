@@ -81,6 +81,25 @@ Settings persist to `%APPDATA%\WindowPet\settings.json`.
 edge, lean on a screen edge, wave, idle, hop up onto a low window lip, turn back at
 a tall one, and recover if he ever ends up below everything.
 
+### Keeping it smooth
+
+Three things in `pet/qtapp.py` exist only so the motion does not stutter, each
+having been a visible judder:
+
+* **The desktop is read on a background thread.** `EnumWindows` plus a DWM call per
+  window takes real time; doing it on the GUI thread a few times a second hitched
+  the animation on every single poll.
+* **The window is a fixed size and is only moved, never resized.** It is sized once
+  for the largest pose any clip reaches. Resizing a translucent layered window
+  every frame is much more expensive than moving it.
+* **There is no per-frame mask.** Click-through comes from answering
+  `WM_NCHITTEST` with the alpha under the cursor, which costs nothing per frame;
+  rebuilding a `QRegion` from the alpha ten times a second made the compositor
+  redo the window region each time.
+
+Sub-pixel position is carried in the draw offset rather than rounded away, so slow
+walking glides instead of crawling from one whole pixel to the next.
+
 ## How the character is rigged
 
 The photo is a T-pose, which is close to ideal: nothing is occluded, both hands are
@@ -141,7 +160,7 @@ The coordinates in `tools/build_assets.py` are specific to this photo — see
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest tests/ -q                        # 158 tests, no display needed
+python -m pytest tests/ -q                        # 177 tests, no display needed
 python -m pet                                     # run it
 
 python tools/render_preview.py --sheet clips.png  # every clip, as a contact sheet

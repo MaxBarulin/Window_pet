@@ -103,7 +103,8 @@ class Behavior:
             min(p.x - lg.x0, lg.x1 - p.x) < self._half_width() * 2.0
         )
 
-        options: list[tuple[str, float]] = [("walk", 3.0), ("dance", 3.0), ("idle", 1.4)]
+        # dancing is the point of him, so it outweighs wandering and idling
+        options: list[tuple[str, float]] = [("walk", 2.4), ("dance", 6.0), ("idle", 0.8)]
         if on_window:
             options.append(("sit_dance", 3.2 if near_ledge_edge else 1.4))
         if near_wall:
