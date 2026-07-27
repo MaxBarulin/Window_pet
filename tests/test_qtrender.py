@@ -15,6 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 import numpy as np  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QImage, QTransform  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -172,6 +173,90 @@ def test_paint_before_first_render_is_harmless(app, rig):
     win = PetWindow(rig, C.Settings())
     assert win._frame is None
     win.repaint()  # must not raise
+
+
+def test_click_through_mask_is_not_inverted(app, rig):
+    """An inverted mask would either hide him or swallow every click.
+
+    The mask is what lets clicks on empty space reach the window underneath, so it
+    has to cover his body and nothing else.
+    """
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QBitmap, QRegion
+
+    win = _window(app, rig, pet_height=240)
+    win.behavior.pet.clip = "idle"
+    win.behavior.pet.clip_time = 0.0
+    win._render()
+    img = win._frame
+    region = QRegion(QBitmap.fromImage(img.createAlphaMask()))
+    assert not region.isEmpty()
+
+    arr = _alpha(img)
+    agree = total = 0
+    for y in range(0, img.height(), 3):
+        for x in range(0, img.width(), 3):
+            total += 1
+            agree += region.contains(QPoint(x, y)) == bool(arr[y, x] > 0)
+    assert agree / total > 0.93, "mask does not track the rendered alpha"
+
+    ys, xs = np.nonzero(arr > 200)
+    body = QPoint(int(xs[len(xs) // 2]), int(ys[len(ys) // 2]))
+    assert region.contains(body)
+    assert not region.contains(QPoint(0, 0))
+
+
+def test_click_through_sets_the_os_level_flag(app, rig):
+    win = _window(app, rig)
+    assert not (win.windowFlags() & Qt.WindowTransparentForInput)
+    win.set_click_through(True)
+    assert win.windowFlags() & Qt.WindowTransparentForInput
+    assert win.testAttribute(Qt.WA_TransparentForMouseEvents)
+    win.set_click_through(False)
+    assert not (win.windowFlags() & Qt.WindowTransparentForInput)
+
+
+def test_toggling_click_through_from_the_menu_does_not_block(app, rig):
+    """The 'you turned it on' notice must not be modal.
+
+    A modal QMessageBox here freezes the whole pet until it is dismissed. If this
+    ever regresses the test does not fail, it hangs - which CI surfaces as a
+    timeout, and is exactly how this was caught in the first place.
+    """
+    win = _window(app, rig)
+    action = next(a for a in win.menu().actions() if a.text() == "Click through")
+    assert not action.isChecked()
+    action.trigger()   # toggles it on; returns only if the notice is non-modal
+    assert win.settings.click_through is True
+    notice = getattr(win, "_notice", None)
+    assert notice is not None and not notice.isModal()
+
+
+def test_the_overlay_never_takes_focus(app, rig):
+    win = _window(app, rig)
+    assert win.windowFlags() & Qt.WindowDoesNotAcceptFocus
+
+
+def test_tray_menu_ticks_follow_the_current_settings(app, rig):
+    """The tray keeps one menu for the whole session, so it must refill on open."""
+    win = _window(app, rig, pet_height=230)
+    menu = win.tray_menu()
+
+    def ticked_sizes(m):
+        sizes = next(a.menu() for a in m.actions() if a.text() == "Size")
+        return {a.text() for a in sizes.actions() if a.isChecked()}
+
+    assert ticked_sizes(menu) == {"Medium"}
+    win.set_height(330)
+    menu.aboutToShow.emit()
+    assert ticked_sizes(menu) == {"Large"}
+
+
+def test_menu_offers_the_expected_actions(app, rig):
+    win = _window(app, rig)
+    labels = [a.text() for a in win.menu().actions() if a.text()]
+    for expected in ("Dance now", "Size", "Click through", "Walk on windows", "Quit"):
+        assert expected in labels
 
 
 def _alpha(img: QImage) -> np.ndarray:

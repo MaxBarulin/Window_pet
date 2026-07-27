@@ -71,10 +71,7 @@ class PetWindow(QWidget):
         self._mask_countdown = 0
         self._last_t = time.perf_counter()
 
-        flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
-        if settings.click_through:
-            flags |= Qt.WindowTransparentForInput
-        self.setWindowFlags(flags)
+        self.setWindowFlags(self._flags())
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         if settings.click_through:
@@ -89,6 +86,22 @@ class PetWindow(QWidget):
         self.timer.start(int(1000 / max(1, settings.fps)))
 
     # -- setup ------------------------------------------------------------
+
+    def _flags(self) -> Qt.WindowType:
+        """WindowDoesNotAcceptFocus matters: a desktop toy must never steal focus
+        from whatever the user is actually typing into."""
+        flags = (
+            Qt.FramelessWindowHint
+            | Qt.WindowStaysOnTopHint
+            | Qt.Tool
+            | Qt.WindowDoesNotAcceptFocus
+        )
+        if self.settings.click_through:
+            # WS_EX_TRANSPARENT. WA_TransparentForMouseEvents alone only stops *Qt*
+            # reacting; the click still lands on this window instead of the app
+            # underneath, which is not what click-through means.
+            flags |= Qt.WindowTransparentForInput
+        return flags
 
     def place_initially(self) -> None:
         snap = self._refresh_desktop(force=True)
@@ -235,8 +248,25 @@ class PetWindow(QWidget):
     def _show_menu(self, pos: QPoint) -> None:
         self.menu().exec(self.mapToGlobal(pos))
 
+    def tray_menu(self) -> QMenu:
+        """A menu that refills itself each time it opens.
+
+        The tray keeps one menu object for the life of the app, so building it once
+        would leave the size and click-through ticks showing whatever was true at
+        startup.
+        """
+        m = QMenu(self)
+        m.aboutToShow.connect(lambda: self._populate(m))
+        self._populate(m)
+        return m
+
     def menu(self) -> QMenu:
         m = QMenu(self)
+        self._populate(m)
+        return m
+
+    def _populate(self, m: QMenu) -> None:
+        m.clear()
         act = QAction("Dance now", m)
         act.triggered.connect(self.behavior.dance_now)
         m.addAction(act)
@@ -246,7 +276,10 @@ class PetWindow(QWidget):
         m.addAction(pause)
         m.addSeparator()
 
-        sizes = m.addMenu("Size")
+        # Keep a Python reference: the QMenu that addMenu() hands back is collected
+        # as soon as this method returns, which kills the submenu.
+        sizes = self._size_menu = QMenu("Size", m)
+        m.addMenu(sizes)
         for label, px in (("Small", 150), ("Medium", 230), ("Large", 330), ("Huge", 460)):
             a = QAction(label, sizes, checkable=True)
             a.setChecked(abs(self.settings.pet_height - px) < 6)
@@ -255,7 +288,7 @@ class PetWindow(QWidget):
 
         ct = QAction("Click through", m, checkable=True)
         ct.setChecked(self.settings.click_through)
-        ct.triggered.connect(self.set_click_through)
+        ct.triggered.connect(lambda on: self.set_click_through(on, notify=True))
         m.addAction(ct)
 
         wow = QAction("Walk on windows", m, checkable=True)
@@ -275,7 +308,6 @@ class PetWindow(QWidget):
         quit_act = QAction("Quit", m)
         quit_act.triggered.connect(QApplication.quit)
         m.addAction(quit_act)
-        return m
 
     # -- settings ---------------------------------------------------------
 
@@ -287,17 +319,26 @@ class PetWindow(QWidget):
         self.settings.clamped()
         self.settings.save()
 
-    def set_click_through(self, on: bool) -> None:
+    def set_click_through(self, on: bool, notify: bool = False) -> None:
         self.settings.click_through = bool(on)
         self.settings.save()
         self.setAttribute(Qt.WA_TransparentForMouseEvents, bool(on))
-        if on:
-            # he can no longer be right-clicked, so say where the options went
-            QMessageBox.information(
-                self, "Window Pet",
+        # changing window flags hides the window, so it has to be shown again
+        self.setWindowFlags(self._flags())
+        self.show()
+        if on and notify:
+            # He can no longer be right-clicked, so say where the options went.
+            # Shown non-modally: a modal box here would freeze the pet, and an
+            # always-on-top toy has no business blocking the event loop.
+            self._notice = QMessageBox(
+                QMessageBox.Information, "Window Pet",
                 "Click-through is on - the mouse now passes straight through him.\n\n"
                 "Use the tray icon to turn it back off.",
+                QMessageBox.Ok,
             )
+            self._notice.setAttribute(Qt.WA_DeleteOnClose, False)
+            self._notice.setWindowModality(Qt.NonModal)
+            self._notice.show()
 
     def set_walk_on_windows(self, on: bool) -> None:
         self.settings.walk_on_windows = bool(on)
@@ -333,7 +374,7 @@ def run(argv: list[str] | None = None) -> int:
     icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
     tray = QSystemTrayIcon(icon, app)
     tray.setToolTip("Window Pet")
-    tray.setContextMenu(win.menu())
+    tray.setContextMenu(win.tray_menu())
     tray.activated.connect(
         lambda reason: win.behavior.dance_now()
         if reason == QSystemTrayIcon.Trigger else None
