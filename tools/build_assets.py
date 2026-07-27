@@ -104,9 +104,10 @@ PART_POLYS: dict[str, list[tuple[int, int]]] = {
     # legs are filled in below: their knee ends need arcs, not corners
 }
 
-# Radius of the round cap both leg pieces carry at the knee, in source px. It is a
-# little over half the leg's width there.
-KNEE_CAP = 48
+# Radius of the shin's cap at the knee, in source px. Just over half the leg's
+# width there (~45), so it covers the thigh's cut end at any bend without standing
+# proud of the leg's own silhouette.
+KNEE_CAP = 46
 
 
 def _arc(cx: int, cy: int, r: int, a0: float, a1: float, steps: int = 14):
@@ -121,32 +122,35 @@ def _arc(cx: int, cy: int, r: int, a0: float, a1: float, steps: int = 14):
 
 
 def _leg_polys() -> dict[str, list[tuple[int, int]]]:
-    """Thigh and shin, each capped with a disc centred on the knee.
+    """Thigh cut square at the knee; shin carrying the whole joint as a round cap.
 
-    A bent knee tears a gap open on the outside of the joint unless the two pieces
-    overlap across it - but overlapping them with square ends just swaps the gap
-    for black corners poking out as the shin swings, the same way square shoulders
-    sprouted wings. A cap centred exactly on the pivot has a silhouette that does
-    not change as the piece rotates, so it can neither tear nor protrude. The
-    overlap costs nothing visually because the trousers are flat black.
+    Getting this joint right took three goes:
+
+    1. Butting the pieces together tears a gap open on the outside of a bend.
+    2. Overlapping them with square ends swaps the gap for black corners poking
+       out as the shin swings - the same way square shoulders sprouted wings.
+    3. Giving *both* pieces a cap looks like a cross. The thigh's stub below the
+       knee does not rotate with the shin, so at a bend it points straight down
+       while the shin points off at an angle, and the two read as crossed limbs.
+
+    What works: the thigh stops at the knee, and the shin owns the joint. The
+    shin's material near its own pivot is effectively a disc - the round cap above
+    plus the leg's own width below - so its silhouette barely changes as it
+    rotates, and it covers the thigh's cut end at any angle. The shin draws over
+    the thigh, and the trousers are flat black, so the overlap is invisible.
     """
     out: dict[str, list[tuple[int, int]]] = {}
     for side, (kx, ky) in (("l", JOINTS["knee_l"]), ("r", JOINTS["knee_r"])):
         inner = _LEG_SPLIT
         outer = 344 if side == "l" else 546
-        # thigh: hip down to a cap bulging below the knee
-        thigh = [(min(outer, inner), 690), (max(outer, inner), 690)]
-        if side == "l":
-            thigh = [(344, 690), (inner, 690), (inner, ky - 4)]
-            thigh += _arc(kx, ky, KNEE_CAP, 0, 180)
-            thigh += [(344, ky - 4)]
-        else:
-            thigh = [(inner, 690), (546, 690), (546, ky - 4)]
-            thigh += _arc(kx, ky, KNEE_CAP, 0, 180)[::-1]
-            thigh += [(inner, ky - 4)]
-        out[f"thigh_{side}"] = thigh
+        lo, hi = min(inner, outer), max(inner, outer)
+        # thigh: hip straight down to a flat cut a few px past the knee, so there
+        # is no stub left sticking out when the shin swings away
+        out[f"thigh_{side}"] = [
+            (lo, 690), (hi, 690), (hi, ky + 6), (lo, ky + 6),
+        ]
 
-        # shin: a cap bulging above the knee, then down to the shoe
+        # shin: round cap centred on the knee, then down to the shoe
         shin = _arc(kx, ky, KNEE_CAP, 180, 360)
         if side == "l":
             shin += [(inner, 1000), (inner, 1140), (330, 1140), (330, 1060), (340, 960)]
