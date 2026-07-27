@@ -28,7 +28,10 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: pytest tests/ -q
+        # `python -m` rather than the bare console script: it puts the working
+        # directory on sys.path. pyproject.toml's pythonpath covers this too, but
+        # this is the invocation the suite is developed against.
+        run: python -m pytest tests/ -q
       - name: Check the rig rebuilds from the cached cutout
         run: |
           python tools/build_assets.py

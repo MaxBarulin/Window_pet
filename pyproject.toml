@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# Put the repo root on sys.path so `import pet` works however pytest is invoked.
+# `python -m pytest` adds the working directory implicitly and the bare `pytest`
+# console script does not, which is exactly the difference that let the suite pass
+# locally and fail in CI.
+pythonpath = ["."]
+testpaths = ["tests"]
