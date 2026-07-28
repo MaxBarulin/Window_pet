@@ -735,12 +735,13 @@ class Editor(QMainWindow):
         out = Path(target)
         self.built.data["source"] = self.source_name
         rig_json = autorig.write(self.built, out)
-        if out == ASSETS:
-            self.cutout.save(ASSETS / "cutout.png")
-            autorig.save_joints(ASSETS / "joints.json", self.canvas.joints,
-                                self.canvas.caps, self.canvas.splits,
-                                self.canvas.free)
-        self.status.setText(f"wrote {rig_json} and {len(self.built.images)} part PNGs")
+        # The matte and the points go with it. Without them the rig cannot be
+        # rebuilt or re-edited, and they were only being written when the target
+        # happened to be the repository's own assets folder.
+        self.cutout.save(out / "cutout.png")
+        autorig.save_joints(out / "joints.json", self.canvas.joints,
+                            self.canvas.caps, self.canvas.splits, self.canvas.free)
+        self.status.setText(f"wrote cutout.png, joints.json, {rig_json.name} and {len(self.built.images)} part PNGs")
 
 
 def main() -> None:

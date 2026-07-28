@@ -245,6 +245,25 @@ def fill_missing_tips(solid: np.ndarray, joints: dict[str, Point]) -> dict[str, 
     return out
 
 
+def _raised_limbs(joints: dict[str, Point]) -> set[str]:
+    """On-outline pivots whose limb does not hang below them.
+
+    Lifting a shoulder to the top of the sleeve, and then refusing the arm any
+    material above that line, is right for an arm held out or down - which is what
+    a T-pose is. It is catastrophic for an arm held *up*: every pixel of the sleeve
+    is above the pivot, so the whole piece is clipped away and the part comes out
+    empty. Those pivots are left where they are and treated as ordinary joints.
+    """
+    out = set()
+    for bone in BONES.values():
+        if not bone.on_outline or bone.tip is None:
+            continue
+        if bone.tip in joints and bone.pivot in joints:
+            if joints[bone.tip][1] < joints[bone.pivot][1] - 2.0:
+                out.add(bone.pivot)
+    return out
+
+
 def snap_joints(solid: np.ndarray, joints: dict[str, Point],
                 free: set[str] | None = None) -> dict[str, Point]:
     """Lift the on-outline pivots onto the outline.
@@ -258,7 +277,7 @@ def snap_joints(solid: np.ndarray, joints: dict[str, Point],
     h = float(np.count_nonzero(solid.any(axis=1)))
     limit = int(SNAP_FRAC * h)
     out = dict(joints)
-    free = free or set()
+    free = set(free or ()) | _raised_limbs(joints)
     for bone in BONES.values():
         if not bone.on_outline or bone.pivot in free:
             continue
@@ -399,7 +418,8 @@ def cut_parts(
     # from the torso - and behaves like every other joint: a cap of its own that
     # turns with it. Pinning one is the way out when the top of a sleeve is the
     # wrong place for it.
-    outline = {n: b.on_outline and b.pivot not in free for n, b in BONES.items()}
+    pinned = free | _raised_limbs(joints)
+    outline = {n: b.on_outline and b.pivot not in pinned for n, b in BONES.items()}
     edt = ndi.distance_transform_edt(solid).astype(np.float32)
     segs = bone_segments(joints, solid)
     widths = {n: _bone_reach(solid, s, height * 0.5) for n, s in segs.items()}
@@ -503,9 +523,14 @@ def cut_parts(
             sizes = ndi.sum(m, lab, range(1, n + 1))
             masks[name] = lab == (int(np.argmax(sizes)) + 1)
         if not masks[name].any():
+            hint = (
+                " Try pinning that pivot, or move it inside him."
+                if BONES[name].on_outline else
+                " Its joints may be on top of each other, or on the wrong limb."
+            )
             raise RigError(
                 f"part '{name}' came out empty - check the joints around "
-                f"{BONES[name].pivot}"
+                f"{BONES[name].pivot} and {BONES[name].tip or 'its far end'}." + hint
             )
 
     claimed = np.zeros_like(solid)

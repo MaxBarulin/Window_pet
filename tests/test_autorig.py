@@ -356,3 +356,20 @@ def test_a_pinned_shoulder_gets_a_cap_like_any_other_joint(alpha, joints):
     pinned = autorig.cut_parts(alpha, inside, free={"shoulder_l"})
     assert snapped.cap_radius["arm_l_upper"] < 3.0
     assert pinned.cap_radius["arm_l_upper"] > 15.0
+
+
+def test_an_arm_held_up_does_not_empty_its_own_part(alpha, joints):
+    """The horizon clip is for arms that hang, and would eat one that is raised.
+
+    Every pixel of a raised sleeve is above its shoulder, so clipping there took
+    the whole piece away and the cut failed with 'came out empty'.
+    """
+    # drop the shoulder below the elbow, so the arm rises from its pivot while
+    # every point stays on real sleeve
+    raised = dict(joints)
+    raised["shoulder_r"] = (joints["shoulder_r"][0], joints["elbow_r"][1] + 40)
+    assert "shoulder_r" in autorig._raised_limbs(raised)
+    cut = autorig.cut_parts(alpha, raised)
+    assert cut.masks["arm_r_upper"].sum() > 500
+    # and it is an ordinary joint now, so it has a cap to turn on
+    assert cut.cap_radius["arm_r_upper"] > 5.0
