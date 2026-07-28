@@ -78,7 +78,7 @@ def test_the_rig_can_be_posed_without_numpy():
         print(len(tf), round(rig.bounds(tf)[3], 2))
     """)
     assert r.returncode == 0, r.stderr
-    assert r.stdout.split()[0] == "11"
+    assert r.stdout.split()[0] == "15"
 
 
 def test_a_whole_simulated_session_runs_without_numpy():

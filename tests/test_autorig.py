@@ -38,13 +38,19 @@ def alpha(cutout) -> np.ndarray:
 
 
 @pytest.fixture(scope="module")
-def joints() -> dict:
+def loaded():
     return autorig.load_joints(JOINTS)
 
 
 @pytest.fixture(scope="module")
-def built(cutout, joints):
-    return autorig.build(cutout, joints)
+def joints(loaded) -> dict:
+    return loaded[0]
+
+
+@pytest.fixture(scope="module")
+def built(cutout, loaded):
+    points, caps, splits = loaded
+    return autorig.build(cutout, points, caps=caps, splits=splits)
 
 
 # --- the skeleton is self-consistent ---------------------------------------
@@ -75,7 +81,7 @@ def test_a_child_never_draws_under_a_parent_it_needs_covering_by():
 
 # --- cutting ---------------------------------------------------------------
 
-def test_all_eleven_parts_come_out_non_empty(built):
+def test_every_part_comes_out_non_empty(built):
     assert set(built.images) == set(autorig.BONES)
     for name, img in built.images.items():
         assert np.asarray(img)[..., 3].max() > 200, name
@@ -270,3 +276,57 @@ def test_legs_that_never_separate_are_reported():
     blob[20:180, 30:70] = 1.0
     with pytest.raises(autorig.RigError):
         autorig.guess_joints(blob)
+
+
+# --- hands, feet, and the hand on the tiller -------------------------------
+
+def test_the_hands_and_feet_come_off_as_their_own_pieces(built):
+    for name in ("hand_l", "hand_r", "foot_l", "foot_r"):
+        assert name in built.data["parts"], name
+        assert built.cut.masks[name].sum() > 500, name
+
+
+def test_a_foot_points_down_and_a_hand_points_outward(built, alpha):
+    """The tips are read off the silhouette, so check they went the right way."""
+    solid = alpha > 0.02
+    segs = autorig.bone_segments(built.cut.joints, solid)
+    for side in ("l", "r"):
+        (ax, ay), (bx, by) = segs[f"foot_{side}"]
+        assert by > ay, "the foot should be below the ankle"
+        (ax, ay), (bx, by) = segs[f"hand_{side}"]
+        wrist = built.cut.joints[f"wrist_{side}"]
+        elbow = built.cut.joints[f"elbow_{side}"]
+        assert (bx - ax) * (wrist[0] - elbow[0]) > 0, "the hand should carry on outward"
+
+
+def test_a_foot_never_steals_the_other_leg(built):
+    """The tip search keeps to the blob the ankle is standing on."""
+    assert not (built.cut.masks["foot_l"] & built.cut.masks["foot_r"]).any()
+
+
+def test_a_bigger_cap_makes_a_joint_claim_more(cutout, loaded):
+    points, caps, splits = loaded
+    small = autorig.build(cutout, points, caps=caps, splits=splits)
+    wide = dict(caps, knee_l=small.cut.cap_radius["shin_l"] + 24.0)
+    big = autorig.build(cutout, points, caps=wide, splits=splits)
+    assert big.cut.masks["shin_l"].sum() > small.cut.masks["shin_l"].sum()
+    assert big.cut.cap_radius["shin_l"] > small.cut.cap_radius["shin_l"]
+
+
+def test_a_split_moves_the_seam_along_the_bone(cutout, loaded):
+    points, caps, splits = loaded
+    base = autorig.build(cutout, points, caps=caps, splits=splits)
+    moved = autorig.build(cutout, points, caps=caps,
+                          splits=dict(splits, knee_l=40.0))
+    # the child takes more, so its parent must give some up
+    assert moved.cut.masks["thigh_l"].sum() < base.cut.masks["thigh_l"].sum()
+
+
+def test_overrides_survive_a_round_trip(tmp_path, loaded):
+    points, _caps, _splits = loaded
+    path = tmp_path / "j.json"
+    autorig.save_joints(path, points, {"knee_l": 41.5}, {"knee_l": -7.0})
+    again, caps, splits = autorig.load_joints(path)
+    assert caps == {"knee_l": 41.5}
+    assert splits == {"knee_l": -7.0}
+    assert again["knee_l"] == points["knee_l"]

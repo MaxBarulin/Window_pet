@@ -1,6 +1,6 @@
 """Place fifteen points on a photo and get a rigged, animatable character out.
 
-This is the only step that needs a human. Everything else - cutting the eleven
+This is the only step that needs a human. Everything else - cutting the fifteen
 parts, finding the joint caps, working out the rest pose, and every clip, physics
 and packaging step after that - runs off `assets/rig.json`.
 
@@ -10,10 +10,18 @@ and packaging step after that - runs off `assets/rig.json`.
 Left-click on the picture to place the joint selected on the right, or drag a
 placed one to nudge it. The preview underneath is the real rig in real clips, so
 a bad pivot shows up immediately as a torn shoulder or a knee in the wrong place.
+
+The cut is not take-it-or-leave-it. Over a joint the wheel grows or shrinks what
+that joint claims - the green circle - and shift plus the wheel slides the seam
+along the bone. The circle's own handle drags too. The automatic values are the
+biggest disc that fits inside him, which is right when a joint sits in the middle
+of a limb and shy when it does not.
 """
 
 from __future__ import annotations
 
+import json
+import math
 import sys
 import traceback
 from pathlib import Path
@@ -68,6 +76,8 @@ PART_COLOURS = {
     "arm_r_upper": (60, 190, 110), "arm_r_fore": (150, 230, 110),
     "thigh_l": (250, 220, 60), "shin_l": (255, 250, 160),
     "thigh_r": (90, 200, 255), "shin_r": (170, 230, 255),
+    "hand_l": (255, 90, 140), "hand_r": (120, 255, 190),
+    "foot_l": (255, 200, 120), "foot_r": (140, 160, 255),
 }
 
 
@@ -91,9 +101,9 @@ class BuildWorker(QObject):
         super().__init__()
         self.height = height
 
-    def run(self, cutout: Image.Image, joints: dict) -> None:
+    def run(self, cutout: Image.Image, joints: dict, caps: dict, splits: dict) -> None:
         try:
-            built = autorig.build(cutout, joints)
+            built = autorig.build(cutout, joints, caps=caps, splits=splits)
         except Exception as exc:  # a bad joint set is normal here, not a crash
             self.done.emit(None, None, str(exc))
             return
@@ -123,7 +133,7 @@ class BuildWorker(QObject):
 class Canvas(QWidget):
     """The cutout with draggable joint markers. Wheel zooms, middle-drag pans."""
 
-    moved = Signal()          # a joint was placed or dragged
+    moved = Signal()          # a joint was placed, dragged, or its cut retuned
     picked = Signal(str)      # a joint marker was clicked
 
     HANDLE = 7
@@ -138,10 +148,16 @@ class Canvas(QWidget):
         self.overlay: QPixmap | None = None
         self.show_parts = False
         self.joints: dict[str, autorig.Point] = {}
+        # Hand overrides on the cut. `cap_shown` is what the last build actually
+        # used, measured or overridden, so the circle on screen is the real one.
+        self.caps: dict[str, float] = {}
+        self.splits: dict[str, float] = {}
+        self.cap_shown: dict[str, float] = {}
         self.selected = autorig.JOINT_ORDER[0]
         self.scale = 1.0
         self.origin = QPointF(0.0, 0.0)
         self._drag: str | None = None
+        self._cap_drag: str | None = None
         self._pan: QPoint | None = None
 
     # -- coordinate mapping ------------------------------------------------
@@ -218,6 +234,51 @@ class Canvas(QWidget):
                 p.drawLine(QPointF(c.x(), 0), QPointF(c.x(), self.height()))
                 p.setPen(QColor(255, 230, 120))
                 p.drawText(c + QPointF(r + 3, -r), name)
+                self._draw_cut_handles(p, name, c)
+
+    def _draw_cut_handles(self, p: QPainter, name: str, centre: QPointF) -> None:
+        """The cap circle, and a tick where the seam sits along the bone."""
+        cap = self.caps.get(name, self.cap_shown.get(name, 0.0))
+        if cap > 0.5:
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor(120, 255, 190, 200), 1.5, Qt.DashLine))
+            p.drawEllipse(centre, cap * self.scale, cap * self.scale)
+            handle = centre + QPointF(cap * self.scale, 0)
+            p.setBrush(QBrush(QColor(120, 255, 190)))
+            p.setPen(QPen(QColor(20, 20, 20), 1))
+            p.drawEllipse(handle, 4, 4)
+
+        split = self.splits.get(name, 0.0)
+        for bone in autorig.BONES.values():
+            if bone.pivot != name or bone.tip not in self.joints:
+                continue
+            tip = self.joints[bone.tip]
+            dx, dy = autorig._norm(tip[0] - self.joints[name][0],
+                                   tip[1] - self.joints[name][1])
+            at = self.to_widget((self.joints[name][0] + dx * split,
+                                 self.joints[name][1] + dy * split))
+            p.setPen(QPen(QColor(255, 130, 200), 2))
+            p.drawLine(at + QPointF(-dy * 14, dx * 14), at + QPointF(dy * 14, -dx * 14))
+            break
+
+    # -- retuning the cut --------------------------------------------------
+
+    def adjust(self, name: str, cap_delta: float, split_delta: float) -> None:
+        if cap_delta:
+            base = self.caps.get(name, self.cap_shown.get(name, 6.0))
+            self.caps[name] = max(0.0, base + cap_delta)
+        if split_delta:
+            self.splits[name] = self.splits.get(name, 0.0) + split_delta
+            if abs(self.splits[name]) < 0.5:
+                self.splits.pop(name)
+        self.update()
+        self.moved.emit()
+
+    def reset_cut(self, name: str) -> None:
+        self.caps.pop(name, None)
+        self.splits.pop(name, None)
+        self.update()
+        self.moved.emit()
 
     # -- interaction -------------------------------------------------------
 
@@ -229,6 +290,15 @@ class Canvas(QWidget):
                     return name
         return None
 
+    def _near_selected(self, pos: QPointF) -> bool:
+        """Inside the selected joint's cap circle, where the wheel means 'resize'."""
+        if self.selected not in self.joints:
+            return False
+        cap = self.caps.get(self.selected, self.cap_shown.get(self.selected, 0.0))
+        d = self.to_widget(self.joints[self.selected]) - pos
+        reach = max(cap * self.scale, self.HANDLE + 6)
+        return d.x() * d.x() + d.y() * d.y() <= reach * reach
+
     def mousePressEvent(self, event):  # noqa: N802 - Qt
         if self.image is None:
             return
@@ -236,6 +306,9 @@ class Canvas(QWidget):
             self._pan = event.position().toPoint()
             return
         if event.button() != Qt.LeftButton:
+            return
+        if self._on_cap_handle(event.position()):
+            self._cap_drag = self.selected
             return
         hit = self._hit(event.position())
         if hit:
@@ -253,18 +326,47 @@ class Canvas(QWidget):
             self.origin += QPointF(delta.x(), delta.y())
             self._pan = event.position().toPoint()
             self.update()
+        elif self._cap_drag:
+            d = self.to_widget(self.joints[self._cap_drag]) - event.position()
+            self.caps[self._cap_drag] = max(
+                0.0, math.hypot(d.x(), d.y()) / max(self.scale, 1e-6)
+            )
+            self.update()
         elif self._drag:
             self.joints[self._drag] = self.to_image(event.position())
             self.update()
 
     def mouseReleaseEvent(self, event):  # noqa: N802 - Qt
-        if self._drag:
-            self._drag = None
+        if self._drag or self._cap_drag:
+            self._drag = self._cap_drag = None
             self.moved.emit()
         self._pan = None
 
+    def _on_cap_handle(self, pos: QPointF) -> bool:
+        if self.selected not in self.joints:
+            return False
+        cap = self.caps.get(self.selected, self.cap_shown.get(self.selected, 0.0))
+        if cap <= 0.5:
+            return False
+        handle = self.to_widget(self.joints[self.selected]) + QPointF(cap * self.scale, 0)
+        d = handle - pos
+        return d.x() * d.x() + d.y() * d.y() <= 49
+
     def wheelEvent(self, event):  # noqa: N802 - Qt
         if self.pixmap is None:
+            return
+        # Over a joint, the wheel resizes what that joint claims rather than
+        # zooming: that is the knob you actually want under your finger while
+        # looking at a seam. Shift slides the seam along the bone instead.
+        target = self._hit(event.position()) or (
+            self.selected if self._near_selected(event.position()) else None
+        )
+        if target:
+            notches = event.angleDelta().y() / 120.0
+            if event.modifiers() & Qt.ShiftModifier:
+                self.adjust(target, 0.0, notches * 3.0)
+            else:
+                self.adjust(target, notches * 2.0, 0.0)
             return
         before = self.to_image(event.position())
         factor = 1.0015 ** event.angleDelta().y()
@@ -279,7 +381,7 @@ class Canvas(QWidget):
 # ---------------------------------------------------------------------------
 
 class Editor(QMainWindow):
-    build_requested = Signal(object, object)
+    build_requested = Signal(object, object, object, object)
 
     def __init__(self, start: Path | None = None):
         super().__init__()
@@ -369,6 +471,8 @@ class Editor(QMainWindow):
             f"Write {ASSETS.name}/rig.json + parts", self.export
         )
         col.addWidget(self.export_button)
+        self.pose_button = self._button("Make him a new dance...", self.open_poses)
+        col.addWidget(self.pose_button)
         hint = QLabel("Then rebuild the exe, or just run <code>python -m pet</code>.")
         hint.setStyleSheet("color:#888;")
         col.addWidget(hint)
@@ -498,7 +602,10 @@ class Editor(QMainWindow):
             self.status.setText(f"{len(missing)} still to place: {missing[0]}")
             return
         self.status.setText("cutting...")
-        self.build_requested.emit(self.cutout, dict(self.canvas.joints))
+        self.build_requested.emit(
+            self.cutout, dict(self.canvas.joints),
+            dict(self.canvas.caps), dict(self.canvas.splits),
+        )
 
     def on_built(self, built, frames, error: str) -> None:
         if built is None:
@@ -507,6 +614,10 @@ class Editor(QMainWindow):
             return
         self.built = built
         self.export_button.setEnabled(True)
+        self.canvas.cap_shown = {
+            bone.pivot: built.cut.cap_radius[name]
+            for name, bone in autorig.BONES.items()
+        }
         # Show where the shoulders were lifted to, but touch nothing else: the
         # user may well have dragged another joint while this build was running.
         for bone in autorig.BONES.values():
@@ -521,7 +632,7 @@ class Editor(QMainWindow):
             self.preview.setPixmap(pil_to_qpixmap(self._strip(frames)))
         rest = built.data["rest_angles"]
         self.status.setText(
-            f"11 parts, {built.cut.unassigned * 100:.2f}% of him in none of them. "
+            f"{len(built.images)} parts, {built.cut.unassigned * 100:.2f}% unclaimed. "
             f"Arms rest at {rest['arm_l_upper']:.0f} deg."
             + (f"\n{error}" if error else "")
         )
@@ -552,13 +663,26 @@ class Editor(QMainWindow):
             tile[..., 3] = np.where(m, 255, tile[..., 3])
         self.canvas.overlay = pil_to_qpixmap(Image.fromarray(rgba, "RGBA"))
 
+    def open_poses(self) -> None:
+        """Keyframe a dance against the rig as it currently stands."""
+        if self.built is None:
+            self.status.setText("cut him up first - the pose editor needs a rig")
+            return
+        from tools.pose_editor import PoseEditor
+
+        dlg = PoseEditor(Rig(self.built.data, ASSETS), self.built.images,
+                         ASSETS / "poses.json", self)
+        dlg.saved.connect(lambda n: self.status.setText(f"saved the clip '{n}'"))
+        dlg.exec()
+
     def load_joints(self) -> None:
         name, _ = QFileDialog.getOpenFileName(
             self, "Load joints", str(ASSETS), "JSON (*.json)"
         )
         if not name:
             return
-        self.canvas.joints = autorig.load_joints(Path(name))
+        points, caps, splits = autorig.load_joints(Path(name))
+        self.canvas.joints, self.canvas.caps, self.canvas.splits = points, caps, splits
         self.canvas.update()
         self.on_joints_changed()
 
@@ -567,7 +691,8 @@ class Editor(QMainWindow):
             self, "Save joints", str(ASSETS / "joints.json"), "JSON (*.json)"
         )
         if name:
-            autorig.save_joints(Path(name), self.canvas.joints)
+            autorig.save_joints(Path(name), self.canvas.joints,
+                                self.canvas.caps, self.canvas.splits)
             self.status.setText(f"wrote {name}")
 
     def export(self) -> None:
@@ -583,8 +708,9 @@ class Editor(QMainWindow):
         rig_json = autorig.write(self.built, out)
         if out == ASSETS:
             self.cutout.save(ASSETS / "cutout.png")
-            autorig.save_joints(ASSETS / "joints.json", self.canvas.joints)
-        self.status.setText(f"wrote {rig_json} and 11 part PNGs")
+            autorig.save_joints(ASSETS / "joints.json", self.canvas.joints,
+                                self.canvas.caps, self.canvas.splits)
+        self.status.setText(f"wrote {rig_json} and {len(self.built.images)} part PNGs")
 
 
 def main() -> None:

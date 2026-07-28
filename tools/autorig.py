@@ -68,15 +68,29 @@ BONES: dict[str, Bone] = {
     # out past the shoulder as a wing. `snap_joints` puts them there.
     "arm_r_upper": Bone("torso", "shoulder_r", "elbow_r", 0, on_outline=True),
     "arm_r_fore": Bone("arm_r_upper", "elbow_r", "wrist_r", 1),
-    "arm_l_upper": Bone("torso", "shoulder_l", "elbow_l", 2, on_outline=True),
-    "arm_l_fore": Bone("arm_l_upper", "elbow_l", "wrist_l", 3),
-    "thigh_r": Bone("pelvis", "hip_r", "knee_r", 4),
-    "shin_r": Bone("thigh_r", "knee_r", "ankle_r", 5),
-    "thigh_l": Bone("pelvis", "hip_l", "knee_l", 6),
-    "shin_l": Bone("thigh_l", "knee_l", "ankle_l", 7),
-    "pelvis": Bone(None, "hips", None, 8),
-    "torso": Bone("pelvis", "waist", "neck", 9),
-    "head": Bone("torso", "neck", None, 10),
+    "hand_r": Bone("arm_r_fore", "wrist_r", None, 2),
+    "arm_l_upper": Bone("torso", "shoulder_l", "elbow_l", 3, on_outline=True),
+    "arm_l_fore": Bone("arm_l_upper", "elbow_l", "wrist_l", 4),
+    "hand_l": Bone("arm_l_fore", "wrist_l", None, 5),
+    "thigh_r": Bone("pelvis", "hip_r", "knee_r", 6),
+    "shin_r": Bone("thigh_r", "knee_r", "ankle_r", 7),
+    "foot_r": Bone("shin_r", "ankle_r", None, 8),
+    "thigh_l": Bone("pelvis", "hip_l", "knee_l", 9),
+    "shin_l": Bone("thigh_l", "knee_l", "ankle_l", 10),
+    "foot_l": Bone("shin_l", "ankle_l", None, 11),
+    "pelvis": Bone(None, "hips", None, 12),
+    "torso": Bone("pelvis", "waist", "neck", 13),
+    "head": Bone("torso", "neck", None, 14),
+}
+
+# Parts whose far end is not a joint anybody places: the bone is found from
+# whatever material lies beyond the pivot. A hand and a foot each need a direction
+# to rotate about, and asking for four more clicks to get it would be rude.
+TIP_FROM_SILHOUETTE = {
+    "hand_l": ("elbow_l", "wrist_l"),
+    "hand_r": ("elbow_r", "wrist_r"),
+    "foot_l": ("knee_l", "ankle_l"),
+    "foot_r": ("knee_r", "ankle_r"),
 }
 
 # The order the editor asks for them in: trunk first, so the centreline and scale
@@ -204,6 +218,9 @@ def bone_segments(joints: dict[str, Point], solid: np.ndarray) -> dict[str, tupl
     for name, bone in BONES.items():
         if bone.tip is not None:
             out[name] = (joints[bone.pivot], joints[bone.tip])
+    for name, (from_joint, pivot_joint) in TIP_FROM_SILHOUETTE.items():
+        out[name] = (joints[pivot_joint],
+                     _tip_beyond(solid, joints[from_joint], joints[pivot_joint]))
     neck = joints["neck"]
     waist = joints["waist"]
     hips = joints["hips"]
@@ -242,6 +259,38 @@ def snap_joints(solid: np.ndarray, joints: dict[str, Point]) -> dict[str, Point]
             top -= 1
         out[bone.pivot] = (float(x), float(top))
     return out
+
+
+def _tip_beyond(solid: np.ndarray, before: Point, pivot: Point) -> Point:
+    """Point through the middle of whatever sticks out past `pivot`.
+
+    A hand and a foot are the last thing on their limb, so there is no joint after
+    them to aim at. What there is instead is material: the shoe below the ankle,
+    the fingers past the wrist. Take the part of it that hangs together with the
+    pivot - so the other shoe cannot be mistaken for this one - and point at its
+    middle.
+    """
+    d = _norm(pivot[0] - before[0], pivot[1] - before[1])
+    span = math.dist(before, pivot)
+    ahead = (
+        solid
+        & (_along(solid.shape, pivot, d) > 1.0)
+        & _disc(solid.shape, pivot, max(span * 0.9, 20.0))
+    )
+    lab, n = ndi.label(ahead)
+    if n == 0:
+        return (pivot[0] + d[0] * 20.0, pivot[1] + d[1] * 20.0)
+    if n > 1:  # keep the blob the pivot itself is standing on
+        want = lab[int(round(pivot[1])), int(round(pivot[0]))]
+        if want == 0:
+            sizes = ndi.sum(ahead, lab, range(1, n + 1))
+            want = int(np.argmax(sizes)) + 1
+        ahead = lab == want
+    ys, xs = np.nonzero(ahead)
+    mid = (float(xs.mean()), float(ys.mean()))
+    # the centroid is halfway along; carry on to the end of it
+    return (pivot[0] + 2.0 * (mid[0] - pivot[0]),
+            pivot[1] + 2.0 * (mid[1] - pivot[1]))
 
 
 def _bone_reach(solid: np.ndarray, seg: tuple[Point, Point], limit: float) -> float:
@@ -290,10 +339,25 @@ class Cut:
     unassigned: float          # fraction of opaque pixels in no part at all
 
 
-def cut_parts(alpha: np.ndarray, joints: dict[str, Point]) -> Cut:
+def cut_parts(
+    alpha: np.ndarray,
+    joints: dict[str, Point],
+    caps_override: dict[str, float] | None = None,
+    splits: dict[str, float] | None = None,
+) -> Cut:
+    """Cut the parts. `caps_override` and `splits` are the hand on the tiller.
+
+    Both are keyed by joint name and both default to what gets measured off the
+    matte. A cap radius is how far a part reaches back around its own pivot - the
+    automatic value is the biggest disc that fits, which is right when the joint
+    sits in the middle of the limb and conservative when it does not. A split
+    moves the seam at a joint along the bone: positive gives the child more.
+    """
     missing = [j for j in JOINT_ORDER if j not in joints]
     if missing:
         raise RigError("missing joints: " + ", ".join(missing))
+    caps_override = caps_override or {}
+    splits = splits or {}
 
     solid = alpha > 0.02
     if not solid.any():
@@ -305,7 +369,15 @@ def cut_parts(alpha: np.ndarray, joints: dict[str, Point]) -> Cut:
     edt = ndi.distance_transform_edt(solid).astype(np.float32)
     segs = bone_segments(joints, solid)
     widths = {n: _bone_reach(solid, s, height * 0.5) for n, s in segs.items()}
-    caps = {n: _sample(edt, joints[BONES[n].pivot]) for n in BONES}
+    caps = {
+        n: float(caps_override.get(BONES[n].pivot, _sample(edt, joints[BONES[n].pivot])))
+        for n in BONES
+    }
+
+    def split_at(name: str) -> float:
+        """How far the seam at this part's far joint has been dragged."""
+        bone = BONES[name]
+        return float(splits.get(bone.tip or bone.pivot, 0.0))
 
     overlap = DISTAL_OVERLAP_FRAC * height
     has_child = {n: any(b.parent == n for b in BONES.values()) for n in BONES}
@@ -329,10 +401,10 @@ def cut_parts(alpha: np.ndarray, joints: dict[str, Point]) -> Cut:
         elig = np.ones(solid.shape, bool)
         if bone.parent is not None:
             # nothing behind the pivot beyond the cap that swings with it
-            elig &= along >= -caps[name]
+            elig &= along >= -(caps[name] + float(splits.get(bone.pivot, 0.0)))
         if has_child[name]:
             # nothing past the far joint but a sliver, hidden under the child's cap
-            elig &= along <= math.dist(*seg) + overlap
+            elig &= along <= math.dist(*seg) + overlap - split_at(name)
         if bone.on_outline and bone.parent is not None:
             # Belt and braces after the snap: the limb gets nothing above its own
             # pivot, because that material would swing outboard as a wing.
@@ -445,12 +517,18 @@ class BuiltRig:
     cut: Cut
 
 
-def build(cutout: Image.Image, joints: dict[str, Point], source_name: str = "source.png") -> BuiltRig:
+def build(
+    cutout: Image.Image,
+    joints: dict[str, Point],
+    source_name: str = "source.png",
+    caps: dict[str, float] | None = None,
+    splits: dict[str, float] | None = None,
+) -> BuiltRig:
     """Cut a background-free RGBA image into parts and describe the skeleton."""
     arr = np.asarray(cutout.convert("RGBA"))
     rgb = arr[..., :3]
     alpha = arr[..., 3].astype(np.float32) / 255.0
-    cut = cut_parts(alpha, joints)
+    cut = cut_parts(alpha, joints, caps, splits)
     joints = cut.joints  # the shoulders may have been lifted onto the outline
 
     solid = alpha > 0.02
@@ -612,16 +690,29 @@ def guess_joints(alpha: np.ndarray) -> dict[str, Point]:
 # CLI
 # ---------------------------------------------------------------------------
 
-def load_joints(path: Path) -> dict[str, Point]:
+def load_joints(path: Path) -> tuple[dict[str, Point], dict[str, float], dict[str, float]]:
+    """Read a joints file: the points, plus any hand-set caps and seam offsets."""
     raw = json.loads(Path(path).read_text())
-    raw = raw.get("joints", raw)
-    return {k: (float(v[0]), float(v[1])) for k, v in raw.items()}
-
-
-def save_joints(path: Path, joints: dict[str, Point]) -> None:
-    Path(path).write_text(
-        json.dumps({"joints": {k: list(v) for k, v in joints.items()}}, indent=2) + "\n"
+    points = raw.get("joints", raw)
+    return (
+        {k: (float(v[0]), float(v[1])) for k, v in points.items()},
+        {k: float(v) for k, v in raw.get("caps", {}).items()},
+        {k: float(v) for k, v in raw.get("splits", {}).items()},
     )
+
+
+def save_joints(
+    path: Path,
+    joints: dict[str, Point],
+    caps: dict[str, float] | None = None,
+    splits: dict[str, float] | None = None,
+) -> None:
+    doc: dict = {"joints": {k: list(v) for k, v in joints.items()}}
+    if caps:
+        doc["caps"] = {k: round(v, 1) for k, v in sorted(caps.items())}
+    if splits:
+        doc["splits"] = {k: round(v, 1) for k, v in sorted(splits.items())}
+    Path(path).write_text(json.dumps(doc, indent=2) + "\n")
 
 
 def main() -> None:
@@ -637,13 +728,15 @@ def main() -> None:
 
     img = Image.open(args.cutout).convert("RGBA")
     alpha = np.asarray(img)[..., 3].astype(np.float32) / 255.0
-    joints = load_joints(args.joints) if args.joints else guess_joints(alpha)
-    if not args.joints:
+    if args.joints:
+        joints, caps, splits = load_joints(args.joints)
+    else:
+        joints, caps, splits = guess_joints(alpha), {}, {}
         print("guessed joints:")
         for name in JOINT_ORDER:
             print(f"  {name:12s} {joints[name]}")
 
-    built = build(img, joints)
+    built = build(img, joints, caps=caps, splits=splits)
     cut = built.cut
     print(f"cutout {img.size}")
     for name in sorted(BONES, key=lambda n: BONES[n].z):
@@ -656,7 +749,7 @@ def main() -> None:
     print(f"  rest angles: {built.data['rest_angles']}")
 
     if args.save_joints:
-        save_joints(args.save_joints, joints)
+        save_joints(args.save_joints, joints, caps, splits)
         print(f"wrote {args.save_joints}")
     if not args.dry_run:
         print(f"wrote {write(built, args.out)}")

@@ -93,7 +93,7 @@ def test_determinant_flips_sign_when_mirrored():
 
 def test_rig_loads_with_one_root_and_full_hierarchy(rig: Rig):
     assert rig.root == "pelvis"
-    assert len(rig.parts) == 11
+    assert len(rig.parts) == 15  # 11 body pieces plus two hands and two feet
     assert set(rig.draw_order) == set(rig.parts)
     # every parent appears before its children
     seen: set[str] = set()

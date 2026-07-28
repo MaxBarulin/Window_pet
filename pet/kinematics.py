@@ -31,6 +31,9 @@ from .rigmath import Matrix, Pose, Rig, about, rotate
 # pixels. Without it there is no headroom for the body to rise on a bounce.
 BASE_CROUCH = 10.0
 
+# How far the ankle will bend to keep the shoe flat. A real one runs out too.
+ANKLE_RANGE = 38.0
+
 
 @dataclass
 class PoseSpec:
@@ -66,6 +69,8 @@ class _Leg:
     shin_dir: float
     bend: float           # +1 puts the knee to screen-left of the hip->ankle line
     sole: tuple[float, float]
+    sole_part: str        # the piece the sole belongs to: the shoe, if there is one
+    foot: str | None      # name of the foot part, when the rig has one
 
 
 def _angle(dx: float, dy: float) -> float:
@@ -88,9 +93,10 @@ class Skeleton:
         hip = rig.joints[f"hip_{side}"]
         knee = rig.joints[f"knee_{side}"]
         ankle = rig.joints[f"ankle_{side}"]
-        part = rig.parts[f"shin_{side}"]
-        ox, oy = part["offset"]
-        w, h = part["size"]
+        foot = f"foot_{side}" if f"foot_{side}" in rig.parts else None
+        sole_part = foot or f"shin_{side}"
+        ox, oy = rig.parts[sole_part]["offset"]
+        w, h = rig.parts[sole_part]["size"]
         return _Leg(
             hip=hip,
             knee=knee,
@@ -100,8 +106,11 @@ class Skeleton:
             thigh_dir=_angle(knee[0] - hip[0], knee[1] - hip[1]),
             shin_dir=_angle(ankle[0] - knee[0], ankle[1] - knee[1]),
             bend=bend,
-            # the sole is the bottom of the shoe: bottom-centre of the shin piece
+            # the sole is the bottom of the shoe, bottom-centre of whichever piece
+            # actually holds it
             sole=(ox + w / 2.0, float(oy + h)),
+            sole_part=sole_part,
+            foot=foot,
         )
 
     @property
@@ -170,6 +179,13 @@ class Skeleton:
             thigh, shin = self.solve_leg(side, hip, target)
             angles[f"thigh_{side}"] = thigh - spec.lean
             angles[f"shin_{side}"] = shin
+            if leg.foot:
+                # The shoe is a separate piece, so it can stay flat instead of
+                # pointing wherever the shin happens to point. Cancelling the
+                # accumulated leg rotation is what an ankle does; the limit is
+                # there because a real one runs out, and past it the shoe reads
+                # as snapped off rather than planted.
+                angles[leg.foot] = max(-ANKLE_RANGE, min(ANKLE_RANGE, -(thigh + shin)))
         return Pose(angles=angles, offset=(bx, by))
 
     # -- where he is standing ---------------------------------------------
@@ -181,6 +197,6 @@ class Skeleton:
         artwork any more, so the renderer asks the pose where his feet ended up.
         """
         return max(
-            transforms[f"shin_{side}"].apply(*leg.sole)[1]
-            for side, leg in self.legs.items()
+            transforms[leg.sole_part].apply(*leg.sole)[1]
+            for leg in self.legs.values()
         )

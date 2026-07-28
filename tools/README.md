@@ -46,6 +46,11 @@ of the work is nudging.
   visibly separate. Put them low and the pelvis hangs over the top of the thighs;
   the bend then reads along the bottom edge of the pelvis instead of at the hip,
   and he looks like he has a second knee.
+* **The wheel is the tuning knob.** Over a selected joint it resizes that joint's
+  cap; shift plus wheel slides the seam along the bone. Both land in
+  `assets/joints.json` under `caps` and `splits`, so they survive a rebuild.
+* **Hands and feet cost no clicks.** There is no joint past a wrist or an ankle,
+  so their bones are read off the material beyond the pivot.
 * **Parts overlap, and should.** Neighbouring pieces share a band along the bone so
   a bent elbow or knee shows no gap. `autorig.py` reports how many opaque pixels
   ended up in no part at all; it should stay well under 1%.

@@ -118,9 +118,16 @@ assets/joints.json ────────────────────�
 2. **`assets/joints.json`** is fifteen points — neck, waist, hips, and a shoulder,
    elbow, wrist, hip, knee and ankle down each side. This is the *only* thing in
    the repository that is specific to the person in the photo.
-3. **`tools/autorig.py`** cuts the matte into 11 parts from those points alone and
+3. **`tools/autorig.py`** cuts the matte into 15 parts from those points alone and
    writes the skeleton — pivots, parents and draw order. Place the points with
    **`tools/rig_editor.py`**, which previews the result live.
+
+The hands and the feet are pieces of their own, and neither costs a click: there
+is no joint past a wrist or an ankle to aim at, so the bone is read off whatever
+material hangs beyond the pivot — the shoe below the ankle, the fingers past the
+wrist — keeping to the blob the pivot itself stands on so one shoe cannot be
+mistaken for the other. A separate shoe is what lets the ankle hold it flat
+instead of letting it point wherever the shin points.
 
 ### How the parts are found
 
@@ -154,6 +161,31 @@ On top of the assignment, three rules, each of which was a visible bug first:
 `tools/rig_editor.py` lifts a shoulder point to the top of the sleeve for you, so
 clicking anywhere down the shoulder is good enough. Eleven pixels of sleeve left
 above the pivot is enough to grow a wing.
+
+### Overriding the cut
+
+The measured values are a starting point, not a verdict. In the editor, with a
+joint selected:
+
+| Gesture | What it does |
+| --- | --- |
+| Wheel over the joint | Grows or shrinks its cap — how much it claims around itself. |
+| Drag the circle's handle | The same thing, continuously. |
+| Shift + wheel | Slides the seam along the bone: away from the joint gives the child more. |
+
+Both are saved into `assets/joints.json` next to the points, so a rebuild keeps
+them. Growing a cap past the inscribed radius does mean it is no longer a full
+disc, and a cap that is not a full disc changes shape as it turns — that is the
+trade being made, and it is worth making when a joint sits off the centre of its
+limb and the automatic radius comes out shy.
+
+### Dances you author yourself
+
+**`tools/pose_editor.py`**, reachable from the rig editor, poses him with sliders,
+keyframes the result and writes `assets/poses.json`. `pet/poses.py` reads that at
+import and adds the clips to the pool he picks dances from, so a saved clip is one
+he will actually break into. The sliders are a `PoseSpec` — hips and feet, not
+knee angles — so the legs are still solved by IK and still plant properly.
 
 ### How the movement is built
 

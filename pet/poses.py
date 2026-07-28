@@ -27,8 +27,10 @@ scale with him.
 
 from __future__ import annotations
 
+import json
 import math
 import random
+import sys
 from dataclasses import dataclass
 from typing import Callable
 
@@ -496,8 +498,116 @@ CLIPS: dict[str, Clip] = {
     "dragged": Clip("dragged", 1.4, _dragged),
 }
 
-DANCES = ("hiphop", "step_touch", "kazachok", "hop_step", "shimmy",
-          "contemporary")
+_BUILT_IN_DANCES = ("hiphop", "step_touch", "kazachok", "hop_step", "shimmy",
+                    "contemporary")
+
+
+# ---------------------------------------------------------------------------
+# Clips authored in the rig editor
+# ---------------------------------------------------------------------------
+#
+# A hand-authored clip is a list of keyframes rather than a function of phase.
+# Keys hold the same fields a `PoseSpec` does, and the ones in between are
+# interpolated - eased, not linear, because a limb accelerating out of a pose and
+# settling into the next one is most of what makes a pose sequence read as motion
+# rather than as a slideshow.
+
+_VECTORS = ("body", "foot_l", "foot_r")
+_SCALARS = ("lean", "torso", "head",
+            "arm_l_upper", "arm_l_fore", "arm_r_upper", "arm_r_fore")
+
+
+def _key_to_spec(key: dict) -> PoseSpec:
+    return PoseSpec(
+        **{f: tuple(key.get(f, (0.0, 0.0))) for f in _VECTORS},
+        **{f: float(key.get(f, 0.0)) for f in _SCALARS},
+    )
+
+
+def _blend(a: PoseSpec, b: PoseSpec, t: float) -> PoseSpec:
+    t = _smooth(t)
+    out = {f: tuple(u * (1 - t) + v * t
+                    for u, v in zip(getattr(a, f), getattr(b, f)))
+           for f in _VECTORS}
+    out.update({f: getattr(a, f) * (1 - t) + getattr(b, f) * t for f in _SCALARS})
+    return PoseSpec(**out)
+
+
+def keyframe_clip(spec: dict) -> Clip:
+    """Build a Clip from an editor-authored keyframe list."""
+    keys = sorted(spec["keys"], key=lambda k: float(k.get("phase", 0.0)))
+    if not keys:
+        raise ValueError(f"clip {spec.get('name')!r} has no keyframes")
+    loop = bool(spec.get("loop", True))
+    phases = [max(0.0, min(1.0, float(k.get("phase", 0.0)))) for k in keys]
+    poses = [_key_to_spec(k) for k in keys]
+    if loop and phases[0] > 0.0:  # wrap the last key round to the start
+        phases.insert(0, 0.0)
+        poses.insert(0, poses[-1])
+
+    def fn(p: float) -> PoseSpec:
+        if len(poses) == 1:
+            return poses[0]
+        for i in range(len(phases) - 1):
+            if phases[i] <= p <= phases[i + 1]:
+                span = phases[i + 1] - phases[i]
+                t = 0.0 if span <= 1e-6 else (p - phases[i]) / span
+                return _blend(poses[i], poses[i + 1], t)
+        # past the last key: run back to the first one if it loops
+        span = 1.0 - phases[-1]
+        if not loop or span <= 1e-6:
+            return poses[-1]
+        return _blend(poses[-1], poses[0], (p - phases[-1]) / span)
+
+    return Clip(
+        name=str(spec["name"]),
+        duration=max(0.15, float(spec.get("duration", 1.6))),
+        fn=fn,
+        speed=float(spec.get("speed", 0.0)),
+        loop=loop,
+    )
+
+
+def load_clips(path) -> dict[str, Clip]:
+    """Read editor-authored clips. A broken file must not stop him running."""
+    from pathlib import Path
+
+    path = Path(path)
+    if not path.exists():
+        return {}
+    try:
+        doc = json.loads(path.read_text())
+        return {c["name"]: keyframe_clip(c) for c in doc.get("clips", [])}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def register(clips: dict[str, Clip], dances: list[str] | None = None) -> None:
+    """Add clips to the library, optionally offering them up as dances."""
+    global DANCES
+    CLIPS.update(clips)
+    extra = [n for n in (dances or list(clips)) if n in CLIPS and n not in DANCES]
+    DANCES = tuple(DANCES) + tuple(extra)
+
+
+def assets_dir():
+    """Where the rig lives, whether running from source or from the exe."""
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parent.parent / "assets"
+    if (here / "rig.json").exists():
+        return here
+    return Path(getattr(sys, "_MEIPASS", ".")) / "assets"
+
+
+DANCES: tuple[str, ...] = _BUILT_IN_DANCES
+
+_custom = load_clips(assets_dir() / "poses.json")
+if _custom:
+    _doc_names = [c["name"] for c in
+                  json.loads((assets_dir() / "poses.json").read_text())["clips"]
+                  if c.get("dance", True)]
+    register(_custom, _doc_names)
 
 
 def random_dance(rng: random.Random | None = None) -> str:

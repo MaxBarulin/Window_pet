@@ -108,15 +108,15 @@
       "file": "parts/arm_r_fore.png",
       "offset": [
         618,
-        294
+        335
       ],
       "size": [
-        274,
-        115
+        165,
+        74
       ],
       "pivot": [
         34.0,
-        78.0
+        37.0
       ],
       "pivot_src": [
         652.0,
@@ -124,6 +124,27 @@
       ],
       "parent": "arm_r_upper",
       "z": 1
+    },
+    "hand_r": {
+      "file": "parts/hand_r.png",
+      "offset": [
+        758,
+        294
+      ],
+      "size": [
+        134,
+        89
+      ],
+      "pivot": [
+        18.0,
+        70.0
+      ],
+      "pivot_src": [
+        776.0,
+        364.0
+      ],
+      "parent": "arm_r_fore",
+      "z": 2
     },
     "arm_l_upper": {
       "file": "parts/arm_l_upper.png",
@@ -144,28 +165,49 @@
         318.0
       ],
       "parent": "torso",
-      "z": 2
+      "z": 3
     },
     "arm_l_fore": {
       "file": "parts/arm_l_fore.png",
       "offset": [
-        3,
-        301
+        112,
+        340
       ],
       "size": [
-        256,
-        108
+        147,
+        69
       ],
       "pivot": [
-        225.0,
-        71.0
+        116.0,
+        32.0
       ],
       "pivot_src": [
         228.0,
         372.0
       ],
       "parent": "arm_l_upper",
-      "z": 3
+      "z": 4
+    },
+    "hand_l": {
+      "file": "parts/hand_l.png",
+      "offset": [
+        3,
+        301
+      ],
+      "size": [
+        127,
+        89
+      ],
+      "pivot": [
+        109.0,
+        65.0
+      ],
+      "pivot_src": [
+        112.0,
+        366.0
+      ],
+      "parent": "arm_l_fore",
+      "z": 5
     },
     "thigh_r": {
       "file": "parts/thigh_r.png",
@@ -186,7 +228,7 @@
         718.0
       ],
       "parent": "pelvis",
-      "z": 4
+      "z": 6
     },
     "shin_r": {
       "file": "parts/shin_r.png",
@@ -195,8 +237,8 @@
         858
       ],
       "size": [
-        81,
-        272
+        62,
+        196
       ],
       "pivot": [
         28.0,
@@ -207,7 +249,28 @@
         886.0
       ],
       "parent": "thigh_r",
-      "z": 5
+      "z": 7
+    },
+    "foot_r": {
+      "file": "parts/foot_r.png",
+      "offset": [
+        474,
+        1026
+      ],
+      "size": [
+        73,
+        104
+      ],
+      "pivot": [
+        20.0,
+        20.0
+      ],
+      "pivot_src": [
+        494.0,
+        1046.0
+      ],
+      "parent": "shin_r",
+      "z": 8
     },
     "thigh_l": {
       "file": "parts/thigh_l.png",
@@ -228,20 +291,20 @@
         718.0
       ],
       "parent": "pelvis",
-      "z": 6
+      "z": 9
     },
     "shin_l": {
       "file": "parts/shin_l.png",
       "offset": [
-        342,
+        362,
         856
       ],
       "size": [
-        83,
-        272
+        63,
+        199
       ],
       "pivot": [
-        51.0,
+        31.0,
         30.0
       ],
       "pivot_src": [
@@ -249,7 +312,28 @@
         886.0
       ],
       "parent": "thigh_l",
-      "z": 7
+      "z": 10
+    },
+    "foot_l": {
+      "file": "parts/foot_l.png",
+      "offset": [
+        342,
+        1022
+      ],
+      "size": [
+        73,
+        106
+      ],
+      "pivot": [
+        48.0,
+        24.0
+      ],
+      "pivot_src": [
+        390.0,
+        1046.0
+      ],
+      "parent": "shin_l",
+      "z": 11
     },
     "pelvis": {
       "file": "parts/pelvis.png",
@@ -270,7 +354,7 @@
         700.0
       ],
       "parent": null,
-      "z": 8
+      "z": 12
     },
     "torso": {
       "file": "parts/torso.png",
@@ -291,7 +375,7 @@
         600.0
       ],
       "parent": "pelvis",
-      "z": 9
+      "z": 13
     },
     "head": {
       "file": "parts/head.png",
@@ -312,7 +396,7 @@
         300.0
       ],
       "parent": "torso",
-      "z": 10
+      "z": 14
     }
   }
 }
