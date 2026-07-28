@@ -29,10 +29,11 @@ RIG_JSON = ROOT / "assets" / "rig.json"
 class PilRenderer:
     """Draws a posed rig into an RGBA canvas."""
 
-    def __init__(self, rig: Rig):
+    def __init__(self, rig: Rig, images: dict[str, Image.Image] | None = None):
+        """`images` skips the disk, so an editor can preview a rig it has not saved."""
         self.rig = rig
         self.skeleton = Skeleton(rig)
-        self.images = {
+        self.images = images or {
             name: Image.open(rig.part_file(name)).convert("RGBA")
             for name in rig.parts
         }

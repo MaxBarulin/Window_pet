@@ -32,12 +32,12 @@ jobs:
         # directory on sys.path. pyproject.toml's pythonpath covers this too, but
         # this is the invocation the suite is developed against.
         run: python -m pytest tests/ -q
-      - name: Check the rig rebuilds from the cached cutout
+      - name: Check the rig rebuilds from the cached cutout and joints
         run: |
-          python tools/build_assets.py
+          python tools/autorig.py --joints assets/joints.json
           python tools/make_icon.py
           git diff --exit-code --stat assets/ || (
-            echo "::error::assets/ is out of date - re-run tools/build_assets.py and commit"
+            echo "::error::assets/ is out of date - re-run tools/autorig.py and commit"
             exit 1
           )
       - name: Render a preview of every animation

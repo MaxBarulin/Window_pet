@@ -2,4 +2,4 @@
 pytest>=8.0
 Pillow>=10.0          # asset cutting and the offline preview renderer
 numpy>=1.24           # asset pipeline and test assertions, NOT the runtime
-scipy>=1.11           # morphology used by tools/build_assets.py
+scipy>=1.11           # morphology and distance transforms in tools/autorig.py

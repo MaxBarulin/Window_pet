@@ -1,79 +1,58 @@
 # Asset pipeline
 
-Three scripts turn one photo into a rig. Run them in this order:
+One photo, fifteen points, one rig.
 
 ```bash
-python tools/cutout.py        # background removal  (needs: pip install "rembg[cpu]")
-python tools/build_assets.py  # cut parts + write rig.json
-python tools/make_icon.py     # app icon from the head
+python tools/rig_editor.py your-photo.jpg   # the whole thing, with a live preview
+```
+
+Or the same steps from a shell, if the points already exist:
+
+```bash
+python tools/cutout.py                          # background removal  (pip install "rembg[cpu]")
+python tools/autorig.py --joints assets/joints.json
+python tools/make_icon.py                       # app icon from the head
 ```
 
 `cutout.py` is the only step that needs rembg, and its output is committed, so the
-other two run anywhere.
+other two run anywhere. `autorig.py --dry-run` reports what it would cut without
+writing anything, and with no `--joints` it guesses them from the silhouette.
 
-## How the coordinates in build_assets.py were measured
+## What you have to place, and where
 
-Every number in `JOINTS` and `PART_POLYS` is a pixel coordinate in the 896×1184
-source photo. They were read off the matte rather than guessed, using two probes:
-
-**Row spans** — for a given `y`, the runs of opaque pixels. This gives the silhouette
-width at any height and shows exactly where the legs separate:
-
-```python
-import numpy as np
-from PIL import Image
-a = np.asarray(Image.open("assets/cutout.png").convert("RGBA"))[:, :, 3] > 110
-for y in (325, 430, 700, 760, 886, 1046):
-    row = a[y]
-    runs, s = [], None
-    for x in range(row.size):
-        if row[x] and s is None:
-            s = x
-        elif not row[x] and s is not None:
-            runs.append((s, x - 1)); s = None
-    print(y, runs)
-```
-
-**Column spans** — the vertical extent at a given `x`. The arms are horizontal in a
-T-pose, so this is what locates the elbows, wrists and sleeve thickness:
-
-```python
-for x in (120, 228, 320, 652, 776):
-    col = np.nonzero(a[:, x])[0]
-    print(x, (col.min(), col.max()))
-```
-
-What the measurements gave for this photo:
-
-| Landmark | Reading |
+| Point | Where |
 | --- | --- |
-| Head top / chin | y 156 / ~272 |
-| Collar, shoulder line | y ~300, y 325 spans x 345–539 |
-| Torso width | x 335–542 at y 430 |
-| Belt | y ~600–620 |
-| Crotch (legs separate) | y ~730 |
-| Leg split | x 444, at every height |
-| Knees | y ~886 |
-| Ankles / shoe bottom | y ~1046 / 1128 |
-| Sleeve centreline | y ~372 |
-| Sleeve top at the shoulder | y 321, dropping to ~348 by x 270 |
-| Left wrist / right wrist | x ~112 / ~776 |
+| `neck` | Where the head meets the collar. |
+| `waist` | Centre of the body at the belt. |
+| `hips` | Centre of the pelvis, just above the crotch. |
+| `shoulder_l` / `shoulder_r` | The **top** of each sleeve — see below. |
+| `elbow_*`, `wrist_*` | Middle of the sleeve at the elbow; where the hand starts. |
+| `hip_*` | The hip socket: inside the body, level with the crotch. |
+| `knee_*`, `ankle_*` | Middle of the leg at the knee; where the leg meets the shoe. |
 
-## Gotchas worth knowing before you re-measure
+`_l` is screen-left. Everything else — the part outlines, the joint caps, the rest
+pose that brings the arms down out of the T, the ground point, the draw order — is
+derived. The editor guesses all fifteen to within about 3% of his height, so most
+of the work is nudging.
 
-* **The shoulder pivots are at the top of the sleeve, not its middle.** See the
-  README's rigging section; putting them on the centreline makes wings sprout at the
-  shoulders when the arms come down.
-* **Arm pieces are clamped to `_ARM_TOP`** so they hold no material above the pivot,
-  and they reach ~30px past the pivot into the torso, which draws over them.
-* **Parts may overlap, and should.** Neighbouring pieces share a band along the bone
-  so a bent elbow or knee shows no gap. `build_assets.py` reports how many opaque
-  pixels ended up in no part at all; it should stay well under 1%.
-* **The largest-blob filter** in each part drops slivers of a neighbouring limb that
-  a polygon catches by accident, so polygons can be generous.
-* **`EXTEND_UP`** exists for parts whose top is cut away by a garment and would have
-  nothing left to swing with. The current photo does not need it; the mechanism is
-  kept because a skirt or long coat would.
+## Gotchas worth knowing
+
+* **The shoulders are the only pivots that belong on the outline**, at the top of
+  each sleeve rather than on its centreline. Swinging an arm down maps "outward" to
+  "downward", so material above the pivot swings out past the shoulder as a wing.
+  `snap_joints` lifts the point there for you; you cannot get this one wrong by
+  clicking too low, only by clicking on a different limb.
+* **The hip sockets sit high**, level with the crotch, not down where the legs
+  visibly separate. Put them low and the pelvis hangs over the top of the thighs;
+  the bend then reads along the bottom edge of the pelvis instead of at the hip,
+  and he looks like he has a second knee.
+* **Parts overlap, and should.** Neighbouring pieces share a band along the bone so
+  a bent elbow or knee shows no gap. `autorig.py` reports how many opaque pixels
+  ended up in no part at all; it should stay well under 1%.
+* **A photo where limbs touch cannot be rigged**, by this tool or any other of this
+  kind. Two overlapping arms are one region in one layer, and there is nothing
+  underneath to uncover. If `autorig` reports a part that "came out empty", or the
+  preview shows a limb fused to the body, the photo is the problem.
 
 ## Verifying a change
 
@@ -85,6 +64,7 @@ python tools/render_preview.py --sheet clips.png --frames 8   # all clips
 python tools/render_demo.py --out demo.gif --seed 58          # behaviour on a mock desktop
 ```
 
-To check a re-cut rig reassembles exactly, composite the parts at rest in z-order and
-compare against `assets/cutout.png` — at rest it should be pixel-identical apart from
-the pixels no part claimed.
+`tests/test_autorig.py` asserts the properties rather than the pixels — that no part
+holds material behind its own pivot, that every cap is a disc that fits inside the
+silhouette, that the pelvis stops at the hips — so it still means something on a
+photo it has never seen.

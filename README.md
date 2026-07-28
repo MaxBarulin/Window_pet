@@ -106,7 +106,8 @@ The photo is a T-pose, which is close to ideal: nothing is occluded, both hands 
 visible, and the arms are clear of the body, so no part of him has to be invented.
 
 ```
-assets/source.png ──tools/cutout.py──▶ assets/cutout.png ──tools/build_assets.py──▶ assets/parts/*.png + rig.json
+assets/source.png ──tools/cutout.py──▶ assets/cutout.png ─┐
+assets/joints.json ───────────────────────────────────────┴─tools/autorig.py──▶ assets/parts/*.png + rig.json
 ```
 
 1. **`tools/cutout.py`** removes the background with rembg (U²-Net). Thresholding
@@ -114,19 +115,45 @@ assets/source.png ──tools/cutout.py──▶ assets/cutout.png ──tools/b
    backdrop is white (~243–251), so any global brightness cut either eats the
    sleeves or leaks into them. The result is committed, so the rig can be rebuilt
    without rembg or its 176 MB model.
-2. **`tools/build_assets.py`** cuts the matte into 11 parts with hand-authored
-   polygons and writes the skeleton — pivots, parents and draw order.
+2. **`assets/joints.json`** is fifteen points — neck, waist, hips, and a shoulder,
+   elbow, wrist, hip, knee and ankle down each side. This is the *only* thing in
+   the repository that is specific to the person in the photo.
+3. **`tools/autorig.py`** cuts the matte into 11 parts from those points alone and
+   writes the skeleton — pivots, parents and draw order. Place the points with
+   **`tools/rig_editor.py`**, which previews the result live.
 
-Two details are what make the joints hold up:
+### How the parts are found
 
-* Each arm piece reaches well past its shoulder pivot, into the torso, and the arms
-  draw *behind* the torso. The pivot sits under solid shirt pixels, so the joint
-  cannot tear open.
-* The shoulder pivots sit at the **top** of each sleeve, not on its centreline.
-  Swinging an arm down out of the T maps "outward" to "downward", so any arm
-  material above the pivot swings *outboard* and pokes out past the shoulder as a
-  wing, while material below it swings *inboard* and stays hidden. The arm pieces
-  are clamped to start at the pivot line for exactly this reason.
+Every opaque pixel goes to the bone it is nearest to, with each distance divided by
+how far that bone's own material reaches. That normalisation is not optional: a
+pixel on the side of the ribcage genuinely is closer to the arm bone than to the
+spine, so without it the torso loses its flanks. It is measured as the opaque chord
+*across* the bone, taking the larger side — not as the biggest disc that fits at the
+bone, because a bone need not run down the middle of its own limb, and the shoulder
+pivots deliberately do not.
+
+On top of the assignment, three rules, each of which was a visible bug first:
+
+* **Nothing behind its own pivot.** Material behind a pivot swings *outboard* as the
+  bone turns. That is what sprouted wings from the shoulders when the arms came down
+  out of the T. Whatever gets clipped falls through to the next-best bone, which is
+  the parent, so nothing is lost.
+* **A cap on every joint**, of exactly the radius that still fits inside the
+  silhouette there — which is, by construction, half the limb's width at that joint.
+  A disc centred on the pivot has a silhouette that does not change as the piece
+  rotates, so it can neither tear a gap open on the outside of a bend nor poke out
+  as a corner. Both were how the knee looked wrong. Its radius comes out at 30px on
+  this photo, against the 46 that was guessed by hand.
+* **The shoulders are covered by the torso.** A shoulder pivot belongs on the
+  outline, at the top of the sleeve, so its cap is necessarily nothing and the joint
+  would open up as the arm swings. The torso draws over the arms, so it takes a
+  wedge there instead: all the way down the inside of the sleeve to the armpit, but
+  only a little way outboard. A disc will not do — it has nothing under it once the
+  armpit goes to the arm, and swings away leaving a pointed tab at the shoulder.
+
+`tools/rig_editor.py` lifts a shoulder point to the top of the sleeve for you, so
+clicking anywhere down the shoulder is good enough. Eleven pixels of sleeve left
+above the pivot is enough to grow a wing.
 
 ### How the movement is built
 
@@ -172,27 +199,38 @@ keep it that way.
 
 ### Using a different photo
 
-Best results come from a front-facing, evenly lit, full-body T-pose on a plain
-background. Then:
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pip install "rembg[cpu]"          # only needed to remove a background
+python tools/rig_editor.py your-photo.jpg
+```
+
+Open the photo, hit **Remove background**, check the fifteen guessed points and drag
+the ones that are off, watch the preview, then **Write**. Rebuild the exe — or just
+run `python -m pet` — and it is him.
+
+There is a headless path too, if you already have the points:
 
 ```bash
-cp your-photo.png assets/source.png
-python tools/cutout.py            # needs: pip install "rembg[cpu]"
-# re-measure the joints and polygons in tools/build_assets.py for the new body
-python tools/build_assets.py
+python tools/autorig.py --joints my-joints.json --out assets
 python tools/make_icon.py
 ```
 
-The coordinates in `tools/build_assets.py` are specific to this photo — see
-[`tools/README.md`](tools/README.md) for how they were measured.
+**What the photo has to be.** Front-facing, evenly lit, full-body, roughly a T-pose,
+on a plain background. The T-pose is the part with no workaround: overlapping limbs
+cannot be separated automatically, or by any amount of clicking. If an arm rests
+against the hip, those pixels are one region in one layer and there is no second
+layer underneath to recover. Background removal is the easy half; keeping the limbs
+apart is what makes a photo riggable.
 
 ## Development
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest tests/ -q                        # 229 tests, no display needed
+python -m pytest tests/ -q                        # 250 tests, no display needed
 python -m pet                                     # run it
 
+python tools/rig_editor.py                        # place the joints, see the rig
 python tools/render_preview.py --sheet clips.png  # every clip, as a contact sheet
 python tools/render_preview.py --clip hiphop --gif hiphop.gif
 python tools/render_demo.py --out demo.gif        # the real state machine on a mock desktop
