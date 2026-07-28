@@ -196,7 +196,13 @@ class Skeleton:
         With the feet driven independently there is no fixed 'floor' point in the
         artwork any more, so the renderer asks the pose where his feet ended up.
         """
-        return max(
-            transforms[leg.sole_part].apply(*leg.sole)[1]
-            for leg in self.legs.values()
-        )
+        out = []
+        for leg in self.legs.values():
+            m = transforms[leg.sole_part]
+            # Measured down from the ankle, not by transforming the sole itself.
+            # The shoe turns a little every frame to stay flat, and rotating the
+            # sole point with it walks the contact around by a pixel or two each
+            # way - which is not a bob, it is a shiver.
+            ax, ay = m.apply(*leg.ankle)
+            out.append(ay + (leg.sole[1] - leg.ankle[1]) * math.hypot(m.d, m.e))
+        return max(out)

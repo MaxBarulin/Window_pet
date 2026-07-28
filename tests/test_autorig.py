@@ -49,8 +49,8 @@ def joints(loaded) -> dict:
 
 @pytest.fixture(scope="module")
 def built(cutout, loaded):
-    points, caps, splits = loaded
-    return autorig.build(cutout, points, caps=caps, splits=splits)
+    points, caps, splits, free = loaded
+    return autorig.build(cutout, points, caps=caps, splits=splits, free=free)
 
 
 # --- the skeleton is self-consistent ---------------------------------------
@@ -312,7 +312,7 @@ def test_a_foot_never_steals_the_other_leg(built):
 
 
 def test_a_bigger_cap_makes_a_joint_claim_more(cutout, loaded):
-    points, caps, splits = loaded
+    points, caps, splits, _free = loaded
     small = autorig.build(cutout, points, caps=caps, splits=splits)
     wide = dict(caps, knee_l=small.cut.cap_radius["shin_l"] + 24.0)
     big = autorig.build(cutout, points, caps=wide, splits=splits)
@@ -321,7 +321,7 @@ def test_a_bigger_cap_makes_a_joint_claim_more(cutout, loaded):
 
 
 def test_a_split_moves_the_seam_along_the_bone(cutout, loaded):
-    points, caps, splits = loaded
+    points, caps, splits, _free = loaded
     base = autorig.build(cutout, points, caps=caps, splits=splits)
     moved = autorig.build(cutout, points, caps=caps,
                           splits=dict(splits, knee_l=40.0))
@@ -330,10 +330,29 @@ def test_a_split_moves_the_seam_along_the_bone(cutout, loaded):
 
 
 def test_overrides_survive_a_round_trip(tmp_path, loaded):
-    points, _caps, _splits = loaded
+    points, _caps, _splits, _free = loaded
     path = tmp_path / "j.json"
     autorig.save_joints(path, points, {"knee_l": 41.5}, {"knee_l": -7.0})
-    again, caps, splits = autorig.load_joints(path)
+    again, caps, splits, _free = autorig.load_joints(path)
     assert caps == {"knee_l": 41.5}
     assert splits == {"knee_l": -7.0}
     assert again["knee_l"] == points["knee_l"]
+
+
+def test_a_pinned_shoulder_stays_where_it_was_put(alpha, joints):
+    """Snapping to the sleeve top is the default, not the only option."""
+    solid = alpha > 0.02
+    inside = dict(joints)
+    inside["shoulder_l"] = (joints["shoulder_l"][0], joints["shoulder_l"][1] + 30)
+    assert autorig.snap_joints(solid, inside)["shoulder_l"][1] < inside["shoulder_l"][1]
+    pinned = autorig.snap_joints(solid, inside, free={"shoulder_l"})
+    assert pinned["shoulder_l"] == inside["shoulder_l"]
+
+
+def test_a_pinned_shoulder_gets_a_cap_like_any_other_joint(alpha, joints):
+    inside = dict(joints)
+    inside["shoulder_l"] = (joints["shoulder_l"][0], joints["shoulder_l"][1] + 30)
+    snapped = autorig.cut_parts(alpha, inside)
+    pinned = autorig.cut_parts(alpha, inside, free={"shoulder_l"})
+    assert snapped.cap_radius["arm_l_upper"] < 3.0
+    assert pinned.cap_radius["arm_l_upper"] > 15.0

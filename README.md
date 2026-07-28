@@ -167,6 +167,12 @@ On top of the assignment, three rules, each of which was a visible bug first:
 clicking anywhere down the shoulder is good enough. Eleven pixels of sleeve left
 above the pivot is enough to grow a wing.
 
+That is the default, not the only option. **Pin this pivot where I put it** keeps
+a shoulder inside the figure instead, and a pinned shoulder is then treated like
+every other joint: it gets a rotation-safe cap of its own and the torso stops
+covering it. Worth reaching for when the top of the sleeve is simply the wrong
+place — a raised arm, a coat, a shoulder that is not where the outline says.
+
 ### Overriding the cut
 
 The measured values are a starting point, not a verdict. In the editor, with a

@@ -245,7 +245,8 @@ def fill_missing_tips(solid: np.ndarray, joints: dict[str, Point]) -> dict[str, 
     return out
 
 
-def snap_joints(solid: np.ndarray, joints: dict[str, Point]) -> dict[str, Point]:
+def snap_joints(solid: np.ndarray, joints: dict[str, Point],
+                free: set[str] | None = None) -> dict[str, Point]:
     """Lift the on-outline pivots onto the outline.
 
     Only the shoulders are marked that way, and only ever move straight up: the
@@ -257,8 +258,9 @@ def snap_joints(solid: np.ndarray, joints: dict[str, Point]) -> dict[str, Point]
     h = float(np.count_nonzero(solid.any(axis=1)))
     limit = int(SNAP_FRAC * h)
     out = dict(joints)
+    free = free or set()
     for bone in BONES.values():
-        if not bone.on_outline:
+        if not bone.on_outline or bone.pivot in free:
             continue
         x, y = joints[bone.pivot]
         ix = int(round(min(max(x, 0), solid.shape[1] - 1)))
@@ -367,6 +369,7 @@ def cut_parts(
     joints: dict[str, Point],
     caps_override: dict[str, float] | None = None,
     splits: dict[str, float] | None = None,
+    free: set[str] | None = None,
 ) -> Cut:
     """Cut the parts. `caps_override` and `splits` are the hand on the tiller.
 
@@ -382,6 +385,7 @@ def cut_parts(
         raise RigError("missing joints: " + ", ".join(missing))
     caps_override = caps_override or {}
     splits = splits or {}
+    free = set(free or ())
 
     solid = alpha > 0.02
     if not solid.any():
@@ -389,7 +393,13 @@ def cut_parts(
     ys, xs = np.nonzero(solid)
     height = float(ys.max() - ys.min() + 1)
 
-    joints = snap_joints(solid, joints)
+    joints = snap_joints(solid, joints, free)
+    # A shoulder pinned inside the figure is not on the outline any more, so it
+    # stops needing the treatment that goes with that - no horizon clip, no cover
+    # from the torso - and behaves like every other joint: a cap of its own that
+    # turns with it. Pinning one is the way out when the top of a sleeve is the
+    # wrong place for it.
+    outline = {n: b.on_outline and b.pivot not in free for n, b in BONES.items()}
     edt = ndi.distance_transform_edt(solid).astype(np.float32)
     segs = bone_segments(joints, solid)
     widths = {n: _bone_reach(solid, s, height * 0.5) for n, s in segs.items()}
@@ -401,9 +411,9 @@ def cut_parts(
     # is no longer a full disc and does change shape a little as it turns; a
     # visible gap is worse than that, and the wheel is there to retune it.
     caps = {}
-    for n, bone in BONES.items():
+    for n, bone in BONES.items():  # noqa: B007 - `outline` is keyed the same way
         auto = _sample(edt, joints[bone.pivot])
-        if bone.parent is not None and not bone.on_outline:
+        if bone.parent is not None and not outline[n]:
             pseg = segs[bone.parent]
             pdir = _norm(pseg[1][0] - pseg[0][0], pseg[1][1] - pseg[0][1])
             auto = max(auto, _half_chord(solid, joints[bone.pivot], pdir, height * 0.3))
@@ -440,7 +450,7 @@ def cut_parts(
         if has_child[name]:
             # nothing past the far joint but a sliver, hidden under the child's cap
             elig &= along <= math.dist(*seg) + overlap - split_at(name)
-        if bone.on_outline and bone.parent is not None:
+        if outline[name] and bone.parent is not None:
             # Belt and braces after the snap: the limb gets nothing above its own
             # pivot, because that material would swing outboard as a wing.
             below = joints[BONES[bone.parent].pivot][1] > pivot[1]
@@ -468,7 +478,7 @@ def cut_parts(
     for name, bone in BONES.items():
         pivot = joints[bone.pivot]
         masks[name] |= _disc(solid.shape, pivot, caps[name]) & solid
-        if bone.on_outline and bone.parent is not None:
+        if outline[name] and bone.parent is not None:
             # The cap is necessarily nothing here - the pivot is on the outline -
             # so the joint would open up as the limb swings. The parent draws over
             # the child at exactly these joints, so it keeps the shoulder instead.
@@ -558,12 +568,13 @@ def build(
     source_name: str = "source.png",
     caps: dict[str, float] | None = None,
     splits: dict[str, float] | None = None,
+    free: set[str] | None = None,
 ) -> BuiltRig:
     """Cut a background-free RGBA image into parts and describe the skeleton."""
     arr = np.asarray(cutout.convert("RGBA"))
     rgb = arr[..., :3]
     alpha = arr[..., 3].astype(np.float32) / 255.0
-    cut = cut_parts(alpha, joints, caps, splits)
+    cut = cut_parts(alpha, joints, caps, splits, free)
     joints = cut.joints  # the shoulders may have been lifted onto the outline
 
     solid = alpha > 0.02
@@ -727,14 +738,15 @@ def guess_joints(alpha: np.ndarray) -> dict[str, Point]:
 # CLI
 # ---------------------------------------------------------------------------
 
-def load_joints(path: Path) -> tuple[dict[str, Point], dict[str, float], dict[str, float]]:
-    """Read a joints file: the points, plus any hand-set caps and seam offsets."""
+def load_joints(path: Path):
+    """Read a joints file: points, hand-set caps and seams, and pinned pivots."""
     raw = json.loads(Path(path).read_text())
     points = raw.get("joints", raw)
     return (
         {k: (float(v[0]), float(v[1])) for k, v in points.items()},
         {k: float(v) for k, v in raw.get("caps", {}).items()},
         {k: float(v) for k, v in raw.get("splits", {}).items()},
+        set(raw.get("free", ())),
     )
 
 
@@ -743,12 +755,15 @@ def save_joints(
     joints: dict[str, Point],
     caps: dict[str, float] | None = None,
     splits: dict[str, float] | None = None,
+    free: set[str] | None = None,
 ) -> None:
     doc: dict = {"joints": {k: list(v) for k, v in joints.items()}}
     if caps:
         doc["caps"] = {k: round(v, 1) for k, v in sorted(caps.items())}
     if splits:
         doc["splits"] = {k: round(v, 1) for k, v in sorted(splits.items())}
+    if free:
+        doc["free"] = sorted(free)
     Path(path).write_text(json.dumps(doc, indent=2) + "\n")
 
 
@@ -766,14 +781,14 @@ def main() -> None:
     img = Image.open(args.cutout).convert("RGBA")
     alpha = np.asarray(img)[..., 3].astype(np.float32) / 255.0
     if args.joints:
-        joints, caps, splits = load_joints(args.joints)
+        joints, caps, splits, free = load_joints(args.joints)
     else:
-        joints, caps, splits = guess_joints(alpha), {}, {}
+        joints, caps, splits, free = guess_joints(alpha), {}, {}, set()
         print("guessed joints:")
         for name in JOINT_ORDER:
             print(f"  {name:12s} {joints[name]}")
 
-    built = build(img, joints, caps=caps, splits=splits)
+    built = build(img, joints, caps=caps, splits=splits, free=free)
     cut = built.cut
     print(f"cutout {img.size}")
     for name in sorted(BONES, key=lambda n: BONES[n].z):
@@ -786,7 +801,7 @@ def main() -> None:
     print(f"  rest angles: {built.data['rest_angles']}")
 
     if args.save_joints:
-        save_joints(args.save_joints, built.cut.joints, caps, splits)
+        save_joints(args.save_joints, built.cut.joints, caps, splits, free)
         print(f"wrote {args.save_joints}")
     if not args.dry_run:
         print(f"wrote {write(built, args.out)}")

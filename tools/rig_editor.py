@@ -1,4 +1,4 @@
-"""Place fifteen points on a photo and get a rigged, animatable character out.
+"""Place nineteen points on a photo and get a rigged, animatable character out.
 
 This is the only step that needs a human. Everything else - cutting the fifteen
 parts, finding the joint caps, working out the rest pose, and every clip, physics
@@ -101,9 +101,11 @@ class BuildWorker(QObject):
         super().__init__()
         self.height = height
 
-    def run(self, cutout: Image.Image, joints: dict, caps: dict, splits: dict) -> None:
+    def run(self, cutout: Image.Image, joints: dict, caps: dict, splits: dict,
+            free: object) -> None:
         try:
-            built = autorig.build(cutout, joints, caps=caps, splits=splits)
+            built = autorig.build(cutout, joints, caps=caps, splits=splits,
+                                  free=set(free))
         except Exception as exc:  # a bad joint set is normal here, not a crash
             self.done.emit(None, None, str(exc))
             return
@@ -153,6 +155,8 @@ class Canvas(QWidget):
         self.caps: dict[str, float] = {}
         self.splits: dict[str, float] = {}
         self.cap_shown: dict[str, float] = {}
+        # pivots the user has pinned where they put them, instead of on the outline
+        self.free: set[str] = set()
         self.selected = autorig.JOINT_ORDER[0]
         self.scale = 1.0
         self.origin = QPointF(0.0, 0.0)
@@ -381,7 +385,7 @@ class Canvas(QWidget):
 # ---------------------------------------------------------------------------
 
 class Editor(QMainWindow):
-    build_requested = Signal(object, object, object, object)
+    build_requested = Signal(object, object, object, object, object)
 
     def __init__(self, start: Path | None = None):
         super().__init__()
@@ -451,6 +455,16 @@ class Editor(QMainWindow):
         bar.addWidget(self._button("Load...", self.load_joints))
         bar.addWidget(self._button("Save...", self.save_joints))
         col.addLayout(bar)
+
+        self.pin_toggle = QCheckBox("Pin this pivot where I put it")
+        self.pin_toggle.setToolTip(
+            "Shoulders are lifted to the top of the sleeve by default, because "
+            "material above the pivot swings out as a wing. Pin one to keep it "
+            "inside the figure instead; it then behaves like any other joint, "
+            "with a cap of its own."
+        )
+        self.pin_toggle.toggled.connect(self.on_pin)
+        col.addWidget(self.pin_toggle)
 
         self.parts_toggle = QCheckBox("Show how it cut him up")
         self.parts_toggle.toggled.connect(self.on_toggle_parts)
@@ -573,9 +587,21 @@ class Editor(QMainWindow):
         self.canvas.selected = name
         self.canvas.update()
         self.hint.setText(autorig.HINTS.get(name, ""))
+        if not hasattr(self, "pin_toggle"):
+            return  # still building the panel
+        pinnable = any(b.on_outline and b.pivot == name for b in autorig.BONES.values())
+        self.pin_toggle.setEnabled(pinnable)
+        self.pin_toggle.blockSignals(True)
+        self.pin_toggle.setChecked(name in self.canvas.free)
+        self.pin_toggle.blockSignals(False)
         items = self.list.findItems(name, Qt.MatchExactly)
         if items and self.list.currentItem() is not items[0]:
             self.list.setCurrentItem(items[0])
+
+    def on_pin(self, on: bool) -> None:
+        name = self.canvas.selected
+        (self.canvas.free.add if on else self.canvas.free.discard)(name)
+        self.on_joints_changed()
 
     def on_joints_changed(self) -> None:
         self._refresh_list()
@@ -605,6 +631,7 @@ class Editor(QMainWindow):
         self.build_requested.emit(
             self.cutout, dict(self.canvas.joints),
             dict(self.canvas.caps), dict(self.canvas.splits),
+            set(self.canvas.free),
         )
 
     def on_built(self, built, frames, error: str) -> None:
@@ -621,7 +648,7 @@ class Editor(QMainWindow):
         # Show where the shoulders were lifted to, but touch nothing else: the
         # user may well have dragged another joint while this build was running.
         for bone in autorig.BONES.values():
-            if bone.on_outline:
+            if bone.on_outline and bone.pivot not in self.canvas.free:
                 self.canvas.joints[bone.pivot] = built.cut.joints[bone.pivot]
         self.canvas.overlay = None
         if self.canvas.show_parts:
@@ -681,8 +708,9 @@ class Editor(QMainWindow):
         )
         if not name:
             return
-        points, caps, splits = autorig.load_joints(Path(name))
-        self.canvas.joints, self.canvas.caps, self.canvas.splits = points, caps, splits
+        points, caps, splits, free = autorig.load_joints(Path(name))
+        (self.canvas.joints, self.canvas.caps,
+         self.canvas.splits, self.canvas.free) = points, caps, splits, free
         self.canvas.update()
         self.on_joints_changed()
 
@@ -692,7 +720,8 @@ class Editor(QMainWindow):
         )
         if name:
             autorig.save_joints(Path(name), self.canvas.joints,
-                                self.canvas.caps, self.canvas.splits)
+                                self.canvas.caps, self.canvas.splits,
+                                self.canvas.free)
             self.status.setText(f"wrote {name}")
 
     def export(self) -> None:
@@ -709,7 +738,8 @@ class Editor(QMainWindow):
         if out == ASSETS:
             self.cutout.save(ASSETS / "cutout.png")
             autorig.save_joints(ASSETS / "joints.json", self.canvas.joints,
-                                self.canvas.caps, self.canvas.splits)
+                                self.canvas.caps, self.canvas.splits,
+                                self.canvas.free)
         self.status.setText(f"wrote {rig_json} and {len(self.built.images)} part PNGs")
 
 
