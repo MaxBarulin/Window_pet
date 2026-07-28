@@ -145,10 +145,16 @@ def test_a_cap_reaches_across_its_parents_cut_end(built, alpha):
         pivot = built.cut.joints[bone.pivot]
         pseg = segs[bone.parent]
         pdir = autorig._norm(pseg[1][0] - pseg[0][0], pseg[1][1] - pseg[0][1])
-        need = autorig._half_chord(solid, pivot, pdir, height * 0.3)
+        cseg = segs[name]
+        cdir = autorig._norm(cseg[1][0] - cseg[0][0], cseg[1][1] - cseg[0][1])
         # a chord only means anything where the limb is separate from the body,
-        # so the cap is allowed to stop at 1.3x the disc that fits
-        need = min(need, 1.3 * autorig._sample(edt, pivot))
+        # so the cap stops at whichever is smallest: across the parent, across the
+        # limb itself, or 1.3x the disc that fits
+        need = min(
+            autorig._half_chord(solid, pivot, pdir, height * 0.3),
+            autorig._half_chord(solid, pivot, cdir, height * 0.3),
+            1.3 * autorig._sample(edt, pivot),
+        )
         assert built.cut.cap_radius[name] >= need - 1.0, name
 
 
