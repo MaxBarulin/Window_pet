@@ -37,18 +37,20 @@ from pet.poses import CLIPS, MOTION_DEFAULTS, keyframe_clip, load_clips
 from pet.rigmath import Rig
 from tools.render_preview import PilRenderer
 
-# name, label, min, max, default. Ranges are in source pixels and degrees, sized
-# so the extremes are still a pose rather than a dislocation.
+# name, label, min, max, default, in source pixels and degrees. Every angle goes
+# the whole way round: a cutout past about 40 degrees at a joint starts to look
+# rubbery, but that is a judgement for whoever is posing him, not a limit to
+# enforce - and some poses genuinely need an arm all the way over.
 CONTROLS = [
     ("body_x", "hips across", -90, 90, 0),
     ("body_y", "hips up/down", -60, 150, int(BASE_CROUCH)),
-    ("lean", "pelvis tilt", -25, 25, 0),
-    ("torso", "torso", -30, 30, 0),
-    ("head", "head", -25, 25, 0),
-    ("arm_l_upper", "left arm", -120, 120, 0),
-    ("arm_l_fore", "left forearm", -110, 110, 0),
-    ("arm_r_upper", "right arm", -120, 120, 0),
-    ("arm_r_fore", "right forearm", -110, 110, 0),
+    ("lean", "pelvis tilt", -180, 180, 0),
+    ("torso", "torso", -180, 180, 0),
+    ("head", "head", -180, 180, 0),
+    ("arm_l_upper", "left arm", -180, 180, 0),
+    ("arm_l_fore", "left forearm", -180, 180, 0),
+    ("arm_r_upper", "right arm", -180, 180, 0),
+    ("arm_r_fore", "right forearm", -180, 180, 0),
     ("foot_l_x", "left foot across", -200, 200, 0),
     ("foot_l_y", "left foot up", -180, 40, 0),
     ("foot_r_x", "right foot across", -200, 200, 0),
@@ -157,6 +159,14 @@ class PoseEditor(QDialog):
         self.keylist.currentRowChanged.connect(self.load_key)
         left.addWidget(self.keylist)
 
+        clipbar = QHBoxLayout()
+        for text, slot in (("New clip", self.new_clip),
+                           ("Delete this clip", self.delete_clip)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            clipbar.addWidget(b)
+        left.addLayout(clipbar)
+
         bar = QHBoxLayout()
         for text, slot in (("Drop keyframe", self.add_key),
                            ("Replace", self.replace_key),
@@ -192,6 +202,8 @@ class PoseEditor(QDialog):
             s = QSlider(Qt.Horizontal)
             s.setRange(lo, hi)
             s.setValue(default)
+            s.setSingleStep(1)
+            s.setPageStep(10)   # one wheel notch is one unit, not three
             s.valueChanged.connect(self.on_slider)
             self.sliders[name] = s
             out = QLabel(str(default))
@@ -281,6 +293,33 @@ class PoseEditor(QDialog):
                     f"'{name}' is built in - its shape lives in code. Its size and "
                     "how often he picks it are on the right."
                 )
+
+    def new_clip(self) -> None:
+        """Start a fresh clip rather than editing whatever was loaded."""
+        self.keys = []
+        self.name.setText("my_dance")
+        self.duration.setValue(1.6)
+        self.phase.setValue(0)
+        self.reset()
+        self.cliplist.setCurrentRow(-1)
+        self.refresh_keys()
+
+    def delete_clip(self) -> None:
+        """Remove an authored clip from the file. Built-in ones are not ours."""
+        name = (self.name.text() or "").strip()
+        doc = self._document()
+        if not any(c.get("name") == name for c in doc["clips"]):
+            self.status.setText(f"'{name}' is not one of yours - nothing to delete")
+            return
+        doc["clips"] = [c for c in doc["clips"] if c.get("name") != name]
+        self.poses_file.write_text(json.dumps(doc, indent=2) + "\n")
+        self.status.setText(
+            f"deleted '{name}'; {len(doc['clips'])} of yours left. "
+            "He stops doing it next time he starts."
+        )
+        self.new_clip()
+        self.refresh_clips()
+        self.saved.emit(name)
 
     # -- the motion file ---------------------------------------------------
 

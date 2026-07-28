@@ -83,6 +83,23 @@ BONES: dict[str, Bone] = {
     "head": Bone("torso", "neck", None, 14),
 }
 
+# Arms in front of the body rather than tucked behind it. Off by default, and
+# honestly it does not work yet: the whole shoulder construction depends on the
+# torso drawing over the arm root, because a shoulder cannot hide its own seam.
+# Turned on, the pivot has to move inside the sleeve, which swings the rest angle
+# from -62 to -117 and turns the upper arm into a flap across the chest. Kept
+# because the ordering itself is right and only the shoulder needs rethinking.
+ARMS_FIRST = ("pelvis", "thigh_r", "shin_r", "foot_r", "thigh_l", "shin_l",
+              "foot_l", "torso", "arm_r_upper", "arm_r_fore", "hand_r",
+              "arm_l_upper", "arm_l_fore", "hand_l", "head")
+
+
+def draw_order(arms_in_front: bool) -> dict[str, int]:
+    if not arms_in_front:
+        return {n: b.z for n, b in BONES.items()}
+    return {name: i for i, name in enumerate(ARMS_FIRST)}
+
+
 # Where each tip is guessed from, when nobody has placed it yet: the direction
 # the limb was already going, carried on into whatever material lies beyond.
 TIP_GUESS_FROM = {
@@ -389,6 +406,7 @@ def cut_parts(
     caps_override: dict[str, float] | None = None,
     splits: dict[str, float] | None = None,
     free: set[str] | None = None,
+    arms_in_front: bool = False,
 ) -> Cut:
     """Cut the parts. `caps_override` and `splits` are the hand on the tiller.
 
@@ -412,6 +430,11 @@ def cut_parts(
     ys, xs = np.nonzero(solid)
     height = float(ys.max() - ys.min() + 1)
 
+    # With the arms in front there is nothing drawing over a shoulder, so the
+    # sleeve-top pivot and the torso's cover are both off: the shoulder becomes an
+    # ordinary joint that caps itself.
+    if arms_in_front:
+        free = free | {b.pivot for b in BONES.values() if b.on_outline}
     joints = snap_joints(solid, joints, free)
     # A shoulder pinned inside the figure is not on the outline any more, so it
     # stops needing the treatment that goes with that - no horizon clip, no cover
@@ -434,9 +457,19 @@ def cut_parts(
     for n, bone in BONES.items():  # noqa: B007 - `outline` is keyed the same way
         auto = _sample(edt, joints[bone.pivot])
         if bone.parent is not None and not outline[n]:
-            pseg = segs[bone.parent]
-            pdir = _norm(pseg[1][0] - pseg[0][0], pseg[1][1] - pseg[0][1])
-            auto = max(auto, _half_chord(solid, joints[bone.pivot], pdir, height * 0.3))
+            # Across the parent's bone, because that is the cut end being covered
+            # - but never wider than the limb's own thickness there. At a shoulder
+            # the parent is the trunk, and its chord is the whole shoulder line.
+            # Across the parent's bone, because that is the cut end being
+            # covered - but never much wider than the disc that fits. A chord is
+            # only meaningful where the limb is separate from the body; at a
+            # shoulder it runs from the sleeve straight down through the torso,
+            # and taking it literally gives a cap the size of a wing.
+            widths_at = [1.3 * auto]
+            for seg in (segs[bone.parent], segs[n]):
+                d = _norm(seg[1][0] - seg[0][0], seg[1][1] - seg[0][1])
+                widths_at.append(_half_chord(solid, joints[bone.pivot], d, height * 0.3))
+            auto = max(auto, min(widths_at))
         caps[n] = float(caps_override.get(bone.pivot, auto))
 
     def split_at(name: str) -> float:
@@ -595,6 +628,7 @@ def build(
     splits: dict[str, float] | None = None,
     free: set[str] | None = None,
     max_side: int | None = None,
+    arms_in_front: bool = False,
 ) -> BuiltRig:
     """Cut a background-free RGBA image into parts and describe the skeleton.
 
@@ -618,13 +652,14 @@ def build(
     arr = np.asarray(cutout.convert("RGBA"))
     rgb = arr[..., :3]
     alpha = arr[..., 3].astype(np.float32) / 255.0
-    cut = cut_parts(alpha, joints, caps, splits, free)
+    cut = cut_parts(alpha, joints, caps, splits, free, arms_in_front)
     joints = cut.joints  # the shoulders may have been lifted onto the outline
 
     solid = alpha > 0.02
+    zs = draw_order(arms_in_front)
     parts_meta: dict[str, dict] = {}
     images: dict[str, Image.Image] = {}
-    for name in sorted(BONES, key=lambda n: BONES[n].z):
+    for name in sorted(BONES, key=lambda n: zs[n]):
         m = cut.masks[name]
         ys, xs = np.nonzero(m)
         x0, y0 = int(xs.min()), int(ys.min())
@@ -642,7 +677,7 @@ def build(
             "pivot": [px - x0, py - y0],
             "pivot_src": [px, py],
             "parent": bone.parent,
-            "z": bone.z,
+            "z": zs[name],
         }
 
     fys, fxs = np.nonzero(solid)
@@ -652,6 +687,7 @@ def build(
         "figure_bbox": [int(fxs.min()), int(fys.min()), int(fxs.max()) + 1, int(fys.max()) + 1],
         "ground": list(ground_point(alpha, joints)),
         "rest_angles": rest_angles(joints),
+        "arms_in_front": bool(arms_in_front),
         "joints": {k: [float(v[0]), float(v[1])] for k, v in joints.items()},
         "parts": parts_meta,
     }
@@ -689,7 +725,7 @@ def _run_at(row: np.ndarray, x: float) -> tuple[int, int] | None:
     return None
 
 
-def guess_joints(alpha: np.ndarray) -> dict[str, Point]:
+def guess_joints(alpha: np.ndarray, arms_in_front: bool = False) -> dict[str, Point]:
     """A first stab at the 15 joints, for the user to nudge.
 
     Reads the silhouette the way the coordinates used to be measured by hand: the
@@ -746,7 +782,11 @@ def guess_joints(alpha: np.ndarray) -> dict[str, Point]:
     }
     for side, sx in (("l", tx0 + 0.03 * trunk_w), ("r", tx1 - 0.03 * trunk_w)):
         rows = np.nonzero(solid[:, int(sx)])[0]
-        joints[f"shoulder_{side}"] = (float(sx), float(rows.min()))
+        top = float(rows.min())
+        if arms_in_front:
+            # a third of the way down the sleeve: inside it, so the cap has room
+            top += 0.34 * (float(rows.max()) - top) * 0.5
+        joints[f"shoulder_{side}"] = (float(sx), top)
 
     # arms: fingertip to shoulder, with the elbow and wrist at the usual fractions
     for side, tip in (("l", int(xs.min())), ("r", int(xs.max()))):
@@ -791,6 +831,7 @@ def load_joints(path: Path):
         {k: float(v) for k, v in raw.get("caps", {}).items()},
         {k: float(v) for k, v in raw.get("splits", {}).items()},
         set(raw.get("free", ())),
+        bool(raw.get("arms_in_front", False)),
     )
 
 
@@ -800,6 +841,7 @@ def save_joints(
     caps: dict[str, float] | None = None,
     splits: dict[str, float] | None = None,
     free: set[str] | None = None,
+    arms_in_front: bool = False,
 ) -> None:
     doc: dict = {"joints": {k: list(v) for k, v in joints.items()}}
     if caps:
@@ -808,6 +850,7 @@ def save_joints(
         doc["splits"] = {k: round(v, 1) for k, v in sorted(splits.items())}
     if free:
         doc["free"] = sorted(free)
+    doc["arms_in_front"] = bool(arms_in_front)
     Path(path).write_text(json.dumps(doc, indent=2) + "\n")
 
 
@@ -825,14 +868,15 @@ def main() -> None:
     img = Image.open(args.cutout).convert("RGBA")
     alpha = np.asarray(img)[..., 3].astype(np.float32) / 255.0
     if args.joints:
-        joints, caps, splits, free = load_joints(args.joints)
+        joints, caps, splits, free, front = load_joints(args.joints)
     else:
-        joints, caps, splits, free = guess_joints(alpha), {}, {}, set()
+        joints, caps, splits, free, front = guess_joints(alpha), {}, {}, set(), False
         print("guessed joints:")
         for name in JOINT_ORDER:
             print(f"  {name:12s} {joints[name]}")
 
-    built = build(img, joints, caps=caps, splits=splits, free=free)
+    built = build(img, joints, caps=caps, splits=splits, free=free,
+                  arms_in_front=front)
     cut = built.cut
     print(f"cutout {img.size}")
     for name in sorted(BONES, key=lambda n: BONES[n].z):
@@ -845,7 +889,7 @@ def main() -> None:
     print(f"  rest angles: {built.data['rest_angles']}")
 
     if args.save_joints:
-        save_joints(args.save_joints, built.cut.joints, caps, splits, free)
+        save_joints(args.save_joints, built.cut.joints, caps, splits, free, front)
         print(f"wrote {args.save_joints}")
     if not args.dry_run:
         print(f"wrote {write(built, args.out)}")

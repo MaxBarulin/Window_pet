@@ -49,7 +49,7 @@ def joints(loaded) -> dict:
 
 @pytest.fixture(scope="module")
 def built(cutout, loaded):
-    points, caps, splits, free = loaded
+    points, caps, splits, free, _front = loaded
     return autorig.build(cutout, points, caps=caps, splits=splits, free=free)
 
 
@@ -133,17 +133,22 @@ def test_a_cap_reaches_across_its_parents_cut_end(built, alpha):
     is what tore the shoe away from the shin: at an ankle the shoe's curve pulls
     the inscribed disc well under half the leg's width.
     """
+    from scipy import ndimage as ndi
+
     solid = alpha > 0.02
+    edt = ndi.distance_transform_edt(solid)
     segs = autorig.bone_segments(built.cut.joints, solid)
     height = float(built.data["source_size"][1])
     for name, bone in autorig.BONES.items():
         if bone.parent is None or bone.on_outline:
             continue
+        pivot = built.cut.joints[bone.pivot]
         pseg = segs[bone.parent]
         pdir = autorig._norm(pseg[1][0] - pseg[0][0], pseg[1][1] - pseg[0][1])
-        need = autorig._half_chord(
-            solid, built.cut.joints[bone.pivot], pdir, height * 0.3
-        )
+        need = autorig._half_chord(solid, pivot, pdir, height * 0.3)
+        # a chord only means anything where the limb is separate from the body,
+        # so the cap is allowed to stop at 1.3x the disc that fits
+        need = min(need, 1.3 * autorig._sample(edt, pivot))
         assert built.cut.cap_radius[name] >= need - 1.0, name
 
 
@@ -312,7 +317,7 @@ def test_a_foot_never_steals_the_other_leg(built):
 
 
 def test_a_bigger_cap_makes_a_joint_claim_more(cutout, loaded):
-    points, caps, splits, _free = loaded
+    points, caps, splits, _free, _front = loaded
     small = autorig.build(cutout, points, caps=caps, splits=splits)
     wide = dict(caps, knee_l=small.cut.cap_radius["shin_l"] + 24.0)
     big = autorig.build(cutout, points, caps=wide, splits=splits)
@@ -321,7 +326,7 @@ def test_a_bigger_cap_makes_a_joint_claim_more(cutout, loaded):
 
 
 def test_a_split_moves_the_seam_along_the_bone(cutout, loaded):
-    points, caps, splits, _free = loaded
+    points, caps, splits, _free, _front = loaded
     base = autorig.build(cutout, points, caps=caps, splits=splits)
     moved = autorig.build(cutout, points, caps=caps,
                           splits=dict(splits, knee_l=40.0))
@@ -330,10 +335,10 @@ def test_a_split_moves_the_seam_along_the_bone(cutout, loaded):
 
 
 def test_overrides_survive_a_round_trip(tmp_path, loaded):
-    points, _caps, _splits, _free = loaded
+    points, _caps, _splits, _free, _front = loaded
     path = tmp_path / "j.json"
     autorig.save_joints(path, points, {"knee_l": 41.5}, {"knee_l": -7.0})
-    again, caps, splits, _free = autorig.load_joints(path)
+    again, caps, splits, _free, _front = autorig.load_joints(path)
     assert caps == {"knee_l": 41.5}
     assert splits == {"knee_l": -7.0}
     assert again["knee_l"] == points["knee_l"]
@@ -373,3 +378,11 @@ def test_an_arm_held_up_does_not_empty_its_own_part(alpha, joints):
     assert cut.masks["arm_r_upper"].sum() > 500
     # and it is an ordinary joint now, so it has a cap to turn on
     assert cut.cap_radius["arm_r_upper"] > 5.0
+
+
+def test_the_draw_order_can_put_the_arms_in_front():
+    behind = autorig.draw_order(False)
+    front = autorig.draw_order(True)
+    assert behind["arm_l_upper"] < behind["torso"]
+    assert front["arm_l_upper"] > front["torso"]
+    assert sorted(front.values()) == list(range(len(autorig.BONES)))

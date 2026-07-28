@@ -372,10 +372,12 @@ class Canvas(QWidget):
         )
         if target:
             notches = event.angleDelta().y() / 120.0
+            # one notch, one pixel - it was three, which made the knob feel like
+            # it was moving on its own
             if event.modifiers() & Qt.ShiftModifier:
-                self.adjust(target, 0.0, notches * 3.0)
+                self.adjust(target, 0.0, notches)
             else:
-                self.adjust(target, notches * 2.0, 0.0)
+                self.adjust(target, notches, 0.0)
             return
         before = self.to_image(event.position())
         factor = 1.0015 ** event.angleDelta().y()
