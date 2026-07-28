@@ -9,3 +9,6 @@ dist/
 *.gif
 clips.png
 demo.gif
+
+# rembg's matting model, fetched on first use by tools/cutout.py
+models/

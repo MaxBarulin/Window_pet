@@ -14,6 +14,11 @@ python tools/autorig.py --joints assets/joints.json
 python tools/make_icon.py                       # app icon from the head
 ```
 
+The matting model (176 MB) is downloaded on first use into `models/` inside the
+project, not into `~/.u2net`, and every run after that finds it there. The folder
+is gitignored. Set `U2NET_HOME` yourself if you would rather share one copy
+between projects.
+
 `cutout.py` is the only step that needs rembg, and its output is committed, so the
 other two run anywhere. `autorig.py --dry-run` reports what it would cut without
 writing anything, and with no `--joints` it guesses them from the silhouette.

@@ -9,10 +9,13 @@ rembg or its 176 MB model. `tools/rig_editor.py` calls `cutout` directly.
 
     pip install "rembg[cpu]"
     python tools/cutout.py
+
+The model is cached in models/ inside the project, downloaded on first use.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +25,22 @@ from scipy import ndimage as ndi
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "assets" / "source.png"
 OUT = ROOT / "assets" / "cutout.png"
+
+# rembg keeps its 176 MB model in ~/.u2net by default, which is invisible from
+# the project and easy to lose. Point it at models/ in the repo instead: it is
+# downloaded once, on the first background removal, and every run after that
+# finds it already there. Respect U2NET_HOME if somebody has set it deliberately.
+MODEL_DIR = ROOT / "models"
+os.environ.setdefault("U2NET_HOME", str(MODEL_DIR))
+
+
+def model_path() -> Path:
+    """Where the matting model lives, downloaded or not."""
+    return Path(os.environ["U2NET_HOME"]) / "u2net.onnx"
+
+
+def model_present() -> bool:
+    return model_path().exists()
 
 
 def clean_matte(cut: Image.Image) -> tuple[Image.Image, int]:
@@ -53,6 +72,7 @@ def clean_matte(cut: Image.Image) -> tuple[Image.Image, int]:
 
 def cutout(src: Image.Image) -> Image.Image:
     """Remove the background from a photo. Needs rembg installed."""
+    Path(os.environ["U2NET_HOME"]).mkdir(parents=True, exist_ok=True)
     from rembg import new_session, remove  # imported late: heavy, optional
 
     return clean_matte(remove(src.convert("RGB"), session=new_session("u2net")))[0]
@@ -61,6 +81,8 @@ def cutout(src: Image.Image) -> Image.Image:
 def main() -> None:
     src = Image.open(SRC).convert("RGB")
     print(f"source {SRC.name} {src.size}")
+    print(f"model   {model_path()}"
+          + ("" if model_present() else "  (will be downloaded once)"))
     out = cutout(src)
     out.save(OUT)
     alpha = np.asarray(out)[..., 3]

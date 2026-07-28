@@ -555,10 +555,15 @@ class Editor(QMainWindow):
     def remove_background(self) -> None:
         if self.cutout is None:
             return
-        from tools.cutout import cutout as run_cutout
+        from tools.cutout import cutout as run_cutout, model_path, model_present
 
         self.cut_button.setEnabled(False)
-        self.status.setText("running rembg, this takes a few seconds...")
+        self.status.setText(
+            "running rembg, this takes a few seconds..."
+            if model_present() else
+            f"downloading the matting model once into {model_path().parent}, "
+            "about 176 MB - after this it is instant"
+        )
         QApplication.processEvents()
         try:
             self.cutout = run_cutout(self.cutout)
