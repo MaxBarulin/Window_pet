@@ -54,6 +54,71 @@ KICK_REACH = 168.0      # how far the kicking leg shoots out. The leg is 328
                         # this leaves headroom rather than snapping straight.
 
 
+# --- what the editor is allowed to retune ----------------------------------
+#
+# These are the numbers that decide how big his movement is, rather than what
+# shape it has, so they are safe to expose: a longer stride is still a walk. The
+# shapes themselves stay in code. `assets/motion.json` overrides them.
+
+MOTION_DEFAULTS = {
+    "stride": STRIDE,
+    "step_lift": STEP_LIFT,
+    "squat_depth": SQUAT_DEPTH,
+    "bounce": BOUNCE,
+    "side_step": SIDE_STEP,
+    "kazachok_depth": KAZACHOK_DEPTH,
+    "kick_reach": KICK_REACH,
+    "walk_seconds": 1.02,
+    # how often he picks each thing to do, when he is stood on something
+    "weight_walk": 2.4,
+    "weight_dance": 6.0,
+    "weight_idle": 0.8,
+    "weight_crouch": 1.0,
+    "weight_hop": 1.2,
+}
+
+
+def _assets_dir():
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parent.parent / "assets"
+    if (here / "rig.json").exists():
+        return here
+    return Path(getattr(sys, "_MEIPASS", ".")) / "assets"
+
+
+def load_motion() -> dict:
+    """Read assets/motion.json. Anything wrong with it means the defaults."""
+    out = dict(MOTION_DEFAULTS)
+    try:
+        raw = json.loads((_assets_dir() / "motion.json").read_text())
+    except (OSError, ValueError):
+        return out
+    for key, default in MOTION_DEFAULTS.items():
+        value = raw.get(key, default)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[key] = float(value)
+    return out
+
+
+MOTION = load_motion()
+STRIDE = MOTION["stride"]
+STEP_LIFT = MOTION["step_lift"]
+SQUAT_DEPTH = MOTION["squat_depth"]
+BOUNCE = MOTION["bounce"]
+SIDE_STEP = MOTION["side_step"]
+KAZACHOK_DEPTH = MOTION["kazachok_depth"]
+KICK_REACH = MOTION["kick_reach"]
+
+ACTION_WEIGHTS = {
+    "walk": MOTION["weight_walk"],
+    "dance": MOTION["weight_dance"],
+    "idle": MOTION["weight_idle"],
+    "crouch": MOTION["weight_crouch"],
+    "hop": MOTION["weight_hop"],
+}
+
+
 def _sin(phase: float, freq: float = 1.0, off: float = 0.0) -> float:
     return math.sin(TAU * (phase * freq + off))
 
@@ -475,7 +540,7 @@ def _dragged(p: float) -> PoseSpec:
 
 # figure height in source px; used to convert a stride into travel speed
 _FIGURE_H = 972.0
-_WALK_DURATION = 1.02
+_WALK_DURATION = MOTION["walk_seconds"]
 # two strides per cycle, so he covers exactly what his feet say he does
 _WALK_SPEED = (2 * STRIDE) / _FIGURE_H / _WALK_DURATION
 
@@ -590,15 +655,7 @@ def register(clips: dict[str, Clip], dances: list[str] | None = None) -> None:
     DANCES = tuple(DANCES) + tuple(extra)
 
 
-def assets_dir():
-    """Where the rig lives, whether running from source or from the exe."""
-    from pathlib import Path
-
-    here = Path(__file__).resolve().parent.parent / "assets"
-    if (here / "rig.json").exists():
-        return here
-    return Path(getattr(sys, "_MEIPASS", ".")) / "assets"
-
+assets_dir = _assets_dir
 
 DANCES: tuple[str, ...] = _BUILT_IN_DANCES
 

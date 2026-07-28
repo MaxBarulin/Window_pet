@@ -68,39 +68,38 @@ BONES: dict[str, Bone] = {
     # out past the shoulder as a wing. `snap_joints` puts them there.
     "arm_r_upper": Bone("torso", "shoulder_r", "elbow_r", 0, on_outline=True),
     "arm_r_fore": Bone("arm_r_upper", "elbow_r", "wrist_r", 1),
-    "hand_r": Bone("arm_r_fore", "wrist_r", None, 2),
+    "hand_r": Bone("arm_r_fore", "wrist_r", "fingers_r", 2),
     "arm_l_upper": Bone("torso", "shoulder_l", "elbow_l", 3, on_outline=True),
     "arm_l_fore": Bone("arm_l_upper", "elbow_l", "wrist_l", 4),
-    "hand_l": Bone("arm_l_fore", "wrist_l", None, 5),
+    "hand_l": Bone("arm_l_fore", "wrist_l", "fingers_l", 5),
     "thigh_r": Bone("pelvis", "hip_r", "knee_r", 6),
     "shin_r": Bone("thigh_r", "knee_r", "ankle_r", 7),
-    "foot_r": Bone("shin_r", "ankle_r", None, 8),
+    "foot_r": Bone("shin_r", "ankle_r", "toe_r", 8),
     "thigh_l": Bone("pelvis", "hip_l", "knee_l", 9),
     "shin_l": Bone("thigh_l", "knee_l", "ankle_l", 10),
-    "foot_l": Bone("shin_l", "ankle_l", None, 11),
+    "foot_l": Bone("shin_l", "ankle_l", "toe_l", 11),
     "pelvis": Bone(None, "hips", None, 12),
     "torso": Bone("pelvis", "waist", "neck", 13),
     "head": Bone("torso", "neck", None, 14),
 }
 
-# Parts whose far end is not a joint anybody places: the bone is found from
-# whatever material lies beyond the pivot. A hand and a foot each need a direction
-# to rotate about, and asking for four more clicks to get it would be rude.
-TIP_FROM_SILHOUETTE = {
-    "hand_l": ("elbow_l", "wrist_l"),
-    "hand_r": ("elbow_r", "wrist_r"),
-    "foot_l": ("knee_l", "ankle_l"),
-    "foot_r": ("knee_r", "ankle_r"),
+# Where each tip is guessed from, when nobody has placed it yet: the direction
+# the limb was already going, carried on into whatever material lies beyond.
+TIP_GUESS_FROM = {
+    "fingers_l": ("elbow_l", "wrist_l"),
+    "fingers_r": ("elbow_r", "wrist_r"),
+    "toe_l": ("knee_l", "ankle_l"),
+    "toe_r": ("knee_r", "ankle_r"),
 }
 
 # The order the editor asks for them in: trunk first, so the centreline and scale
 # are established before the limbs hang off it.
 JOINT_ORDER = [
     "neck", "waist", "hips",
-    "shoulder_l", "elbow_l", "wrist_l",
-    "shoulder_r", "elbow_r", "wrist_r",
-    "hip_l", "knee_l", "ankle_l",
-    "hip_r", "knee_r", "ankle_r",
+    "shoulder_l", "elbow_l", "wrist_l", "fingers_l",
+    "shoulder_r", "elbow_r", "wrist_r", "fingers_r",
+    "hip_l", "knee_l", "ankle_l", "toe_l",
+    "hip_r", "knee_r", "ankle_r", "toe_r",
 ]
 
 HINTS = {
@@ -117,8 +116,12 @@ HINTS = {
     "hip_r": "Hip socket: inside the body, level with the crotch.",
     "knee_l": "Middle of the leg at the knee.",
     "knee_r": "Middle of the leg at the knee.",
-    "ankle_l": "Where the leg meets the shoe.",
-    "ankle_r": "Where the leg meets the shoe.",
+    "ankle_l": "The ankle bone, where the leg meets the shoe.",
+    "ankle_r": "The ankle bone, where the leg meets the shoe.",
+    "fingers_l": "The fingertips. Sets which way the hand points.",
+    "fingers_r": "The fingertips. Sets which way the hand points.",
+    "toe_l": "The toe of the shoe. Sets which way the foot points.",
+    "toe_r": "The toe of the shoe. Sets which way the foot points.",
 }
 
 SHOULDER_NOTE = (
@@ -218,9 +221,6 @@ def bone_segments(joints: dict[str, Point], solid: np.ndarray) -> dict[str, tupl
     for name, bone in BONES.items():
         if bone.tip is not None:
             out[name] = (joints[bone.pivot], joints[bone.tip])
-    for name, (from_joint, pivot_joint) in TIP_FROM_SILHOUETTE.items():
-        out[name] = (joints[pivot_joint],
-                     _tip_beyond(solid, joints[from_joint], joints[pivot_joint]))
     neck = joints["neck"]
     waist = joints["waist"]
     hips = joints["hips"]
@@ -233,6 +233,15 @@ def bone_segments(joints: dict[str, Point], solid: np.ndarray) -> dict[str, tupl
     crown_y = float(rows.min()) if rows.size else neck[1] - band
     out["head"] = (neck, (neck[0], crown_y))
     out["pelvis"] = (((waist[0] + hips[0]) / 2, (waist[1] + hips[1]) / 2), hips)
+    return out
+
+
+def fill_missing_tips(solid: np.ndarray, joints: dict[str, Point]) -> dict[str, Point]:
+    """Guess any tip nobody has placed, so an older joints file still loads."""
+    out = dict(joints)
+    for tip, (before, pivot) in TIP_GUESS_FROM.items():
+        if tip not in out and before in out and pivot in out:
+            out[tip] = _tip_beyond(solid, out[before], out[pivot])
     return out
 
 
@@ -291,6 +300,20 @@ def _tip_beyond(solid: np.ndarray, before: Point, pivot: Point) -> Point:
     # the centroid is halfway along; carry on to the end of it
     return (pivot[0] + 2.0 * (mid[0] - pivot[0]),
             pivot[1] + 2.0 * (mid[1] - pivot[1]))
+
+
+def _half_chord(solid: np.ndarray, at: Point, direction: Point, limit: float) -> float:
+    """Half the opaque width across `direction`, right at `at`."""
+    h, w = solid.shape
+    nx, ny = -direction[1], direction[0]
+    steps = np.arange(1, int(limit) + 1, dtype=np.float32)
+    total = 0.0
+    for sign in (1.0, -1.0):
+        ix = np.clip(np.round(at[0] + sign * nx * steps).astype(int), 0, w - 1)
+        iy = np.clip(np.round(at[1] + sign * ny * steps).astype(int), 0, h - 1)
+        gap = np.nonzero(~solid[iy, ix])[0]
+        total += float(gap[0]) if gap.size else limit
+    return total / 2.0
 
 
 def _bone_reach(solid: np.ndarray, seg: tuple[Point, Point], limit: float) -> float:
@@ -353,6 +376,7 @@ def cut_parts(
     sits in the middle of the limb and conservative when it does not. A split
     moves the seam at a joint along the bone: positive gives the child more.
     """
+    joints = fill_missing_tips(alpha > 0.02, joints)
     missing = [j for j in JOINT_ORDER if j not in joints]
     if missing:
         raise RigError("missing joints: " + ", ".join(missing))
@@ -369,10 +393,21 @@ def cut_parts(
     edt = ndi.distance_transform_edt(solid).astype(np.float32)
     segs = bone_segments(joints, solid)
     widths = {n: _bone_reach(solid, s, height * 0.5) for n, s in segs.items()}
-    caps = {
-        n: float(caps_override.get(BONES[n].pivot, _sample(edt, joints[BONES[n].pivot])))
-        for n in BONES
-    }
+    # A cap has to reach right across the parent's cut end, or a gap opens on the
+    # outside of every bend. The inscribed disc is that wide when the joint sits in
+    # the middle of its limb, and short when it does not - at an ankle the shoe's
+    # curve pulls it in well under half the leg's width, and the shoe tore away
+    # from the shin. So take whichever is larger. Past the inscribed radius the cap
+    # is no longer a full disc and does change shape a little as it turns; a
+    # visible gap is worse than that, and the wheel is there to retune it.
+    caps = {}
+    for n, bone in BONES.items():
+        auto = _sample(edt, joints[bone.pivot])
+        if bone.parent is not None and not bone.on_outline:
+            pseg = segs[bone.parent]
+            pdir = _norm(pseg[1][0] - pseg[0][0], pseg[1][1] - pseg[0][1])
+            auto = max(auto, _half_chord(solid, joints[bone.pivot], pdir, height * 0.3))
+        caps[n] = float(caps_override.get(bone.pivot, auto))
 
     def split_at(name: str) -> float:
         """How far the seam at this part's far joint has been dragged."""
@@ -683,6 +718,8 @@ def guess_joints(alpha: np.ndarray) -> dict[str, Point]:
                 leg = runs[0] if sign < 0 else runs[-1]
             mid = (leg[0] + leg[1]) / 2 if leg else cx + sign * 0.21 * trunk_w
             joints[f"{name}_{side}"] = (round(float(mid), 1), float(y))
+    for tip, (before, pivot) in TIP_GUESS_FROM.items():
+        joints[tip] = _tip_beyond(solid, joints[before], joints[pivot])
     return {k: (round(v[0], 1), round(v[1], 1)) for k, v in joints.items()}
 
 
@@ -749,7 +786,7 @@ def main() -> None:
     print(f"  rest angles: {built.data['rest_angles']}")
 
     if args.save_joints:
-        save_joints(args.save_joints, joints, caps, splits)
+        save_joints(args.save_joints, built.cut.joints, caps, splits)
         print(f"wrote {args.save_joints}")
     if not args.dry_run:
         print(f"wrote {write(built, args.out)}")

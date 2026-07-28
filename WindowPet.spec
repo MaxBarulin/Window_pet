@@ -24,8 +24,9 @@ datas = [
 # Dances keyframed in tools/pose_editor.py, if there are any. Optional on purpose:
 # the file only exists once somebody has made one, and a missing data file is a
 # hard PyInstaller error rather than a warning.
-if os.path.exists("assets/poses.json"):
-    datas.append(("assets/poses.json", "assets"))
+for optional in ("assets/poses.json", "assets/motion.json"):
+    if os.path.exists(optional):
+        datas.append((optional, "assets"))
 
 # The pet needs PySide6 and nothing else. numpy in particular must stay out: it
 # was only used for 3x3 affine maths, and its C extensions failed to import inside

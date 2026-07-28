@@ -115,19 +115,24 @@ assets/joints.json ────────────────────�
    backdrop is white (~243–251), so any global brightness cut either eats the
    sleeves or leaks into them. The result is committed, so the rig can be rebuilt
    without rembg or its 176 MB model.
-2. **`assets/joints.json`** is fifteen points — neck, waist, hips, and a shoulder,
-   elbow, wrist, hip, knee and ankle down each side. This is the *only* thing in
+2. **`assets/joints.json`** is nineteen points — neck, waist, hips, and a shoulder,
+   elbow, wrist, fingertip, hip, knee, ankle and toe down each side. This is the *only* thing in
    the repository that is specific to the person in the photo.
 3. **`tools/autorig.py`** cuts the matte into 15 parts from those points alone and
    writes the skeleton — pivots, parents and draw order. Place the points with
    **`tools/rig_editor.py`**, which previews the result live.
 
-The hands and the feet are pieces of their own, and neither costs a click: there
-is no joint past a wrist or an ankle to aim at, so the bone is read off whatever
-material hangs beyond the pivot — the shoe below the ankle, the fingers past the
-wrist — keeping to the blob the pivot itself stands on so one shoe cannot be
-mistaken for the other. A separate shoe is what lets the ankle hold it flat
-instead of letting it point wherever the shin points.
+The hands and the feet are pieces of their own, pivoting at the wrist and the
+ankle and pointing at the fingertip and the toe. The editor guesses those four
+tips from the silhouette so you need not place them, but they are ordinary points
+and dragging one turns the hand or the foot. A separate shoe is what lets the
+ankle hold it flat instead of letting it point wherever the shin points.
+
+A cap is the larger of the biggest disc that fits and half the limb's width at
+that joint. Only the first is rotation-proof, but the second is what stops a gap:
+at an ankle the shoe's curve pulls the inscribed disc well under half the leg's
+width, and the shoe tore away from the shin on every bend. A visible gap is worse
+than a cap that shifts a little as it turns.
 
 ### How the parts are found
 
@@ -178,6 +183,22 @@ them. Growing a cap past the inscribed radius does mean it is no longer a full
 disc, and a cap that is not a full disc changes shape as it turns — that is the
 trade being made, and it is worth making when a joint sits off the centre of its
 limb and the automatic radius comes out shy.
+
+### Everything he can do, and how much of it
+
+The pose editor lists every clip he has: the ones you authored, which load back
+in for editing, and the built-in ones. A built-in clip's *shape* stays in code —
+that is where the weight and the timing live — but its size and how often he
+picks it are on the right of that window and land in `assets/motion.json`:
+
+| Knob | What it changes |
+| --- | --- |
+| step length, step lift, walk seconds | How far and how fast a walk carries him |
+| squat depth, dance bounce, side step | How big the dances are |
+| kazachok depth and kick reach | How low the squat dance sits and how far the kick shoots |
+| how often: walk / dance / stand / crouch / hop | What he picks when he is stood on something |
+
+A missing or broken `motion.json` simply means the defaults.
 
 ### Dances you author yourself
 

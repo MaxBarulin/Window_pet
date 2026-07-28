@@ -76,3 +76,29 @@ def test_a_loaded_clip_resolves_against_the_real_rig(tmp_path):
 def test_the_built_in_dances_are_all_real_clips():
     for name in DANCES:
         assert name in CLIPS
+
+
+def test_motion_defaults_cover_every_knob():
+    from pet.poses import ACTION_WEIGHTS, MOTION, MOTION_DEFAULTS
+    assert set(MOTION) == set(MOTION_DEFAULTS)
+    assert set(ACTION_WEIGHTS) == {"walk", "dance", "idle", "crouch", "hop"}
+    assert all(v > 0 for v in ACTION_WEIGHTS.values())
+
+
+def test_a_broken_motion_file_leaves_the_defaults_alone(tmp_path, monkeypatch):
+    import pet.poses as poses
+
+    bad = tmp_path / "motion.json"
+    bad.write_text("{ not json")
+    monkeypatch.setattr(poses, "_assets_dir", lambda: tmp_path)
+    assert poses.load_motion() == poses.MOTION_DEFAULTS
+
+
+def test_motion_values_are_taken_from_the_file(tmp_path, monkeypatch):
+    import pet.poses as poses
+
+    (tmp_path / "motion.json").write_text(json.dumps({"stride": 140.0, "junk": "x"}))
+    monkeypatch.setattr(poses, "_assets_dir", lambda: tmp_path)
+    loaded = poses.load_motion()
+    assert loaded["stride"] == 140.0
+    assert loaded["bounce"] == poses.MOTION_DEFAULTS["bounce"]

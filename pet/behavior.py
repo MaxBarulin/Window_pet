@@ -16,7 +16,7 @@ from enum import Enum
 
 from . import config as C
 from .desktop import Ledge, Snapshot
-from .poses import CLIPS, DANCES
+from .poses import ACTION_WEIGHTS, CLIPS, DANCES
 
 
 class State(Enum):
@@ -115,8 +115,8 @@ class Behavior:
 
         # dancing is the point of him, so it outweighs wandering and idling
         options: list[tuple[str, float]] = [
-            ("walk", 2.4), ("dance", 6.0), ("idle", 0.8),
-            ("crouch", 1.0), ("hop", 1.2),
+            (name, ACTION_WEIGHTS[name])
+            for name in ("walk", "dance", "idle", "crouch", "hop")
         ]
         if on_window:
             options.append(("sit_dance", 3.2 if near_ledge_edge else 1.4))

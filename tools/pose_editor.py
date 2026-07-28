@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from pet.kinematics import BASE_CROUCH, PoseSpec
-from pet.poses import keyframe_clip
+from pet.poses import CLIPS, MOTION_DEFAULTS, keyframe_clip, load_clips
 from pet.rigmath import Rig
 from tools.render_preview import PilRenderer
 
@@ -92,6 +92,26 @@ def key_to_values(key: dict) -> dict[str, float]:
     return out
 
 
+# The built-in clips are procedural - functions of phase - so they cannot be
+# keyframed here. What can be changed is how big they are, and how often he picks
+# them. Anything that would change the *shape* of a move stays in code.
+MOTION_LABELS = {
+    "stride": "step length",
+    "step_lift": "how high a step lifts",
+    "squat_depth": "how deep a squat goes",
+    "bounce": "dance bounce",
+    "side_step": "side step distance",
+    "kazachok_depth": "kazachok depth",
+    "kick_reach": "kazachok kick reach",
+    "walk_seconds": "seconds per walk cycle",
+    "weight_walk": "how often: walk",
+    "weight_dance": "how often: dance",
+    "weight_idle": "how often: stand about",
+    "weight_crouch": "how often: crouch",
+    "weight_hop": "how often: hop",
+}
+
+
 class PoseEditor(QDialog):
     """Keyframe editor for one clip."""
 
@@ -118,6 +138,13 @@ class PoseEditor(QDialog):
         self.preview.setStyleSheet("background:#2a2a2e; border-radius:4px;")
         self.preview.setMinimumSize(*self.canvas_size)
         left.addWidget(self.preview)
+
+        left.addWidget(QLabel("Everything he can do. Yours are editable; "
+                              "the built-in ones are tunable below."))
+        self.cliplist = QListWidget()
+        self.cliplist.setFixedHeight(120)
+        self.cliplist.currentRowChanged.connect(self.pick_clip)
+        left.addWidget(self.cliplist)
 
         left.addWidget(QLabel("Where in the loop this pose sits"))
         self.phase = QSlider(Qt.Horizontal)
@@ -180,8 +207,103 @@ class PoseEditor(QDialog):
         holder.setLayout(grid)
         row.addWidget(holder, 2)
 
+        self.motion_boxes: dict[str, QDoubleSpinBox] = {}
+        row.addLayout(self._motion_panel(), 1)
+
         self.load_existing()
+        self.refresh_clips()
         self.render()
+
+    def _motion_panel(self) -> QVBoxLayout:
+        col = QVBoxLayout()
+        col.addWidget(QLabel("<b>Built-in moves</b>"))
+        col.addWidget(QLabel("Sizes and how often, in source pixels and seconds."))
+        grid = QGridLayout()
+        current = self._motion_document()
+        for i, (key, label) in enumerate(MOTION_LABELS.items()):
+            box = QDoubleSpinBox()
+            box.setRange(0.0, 400.0)
+            box.setSingleStep(0.1 if key.startswith(("weight", "walk_s")) else 2.0)
+            box.setDecimals(2 if key.startswith(("weight", "walk_s")) else 0)
+            box.setValue(float(current.get(key, MOTION_DEFAULTS[key])))
+            self.motion_boxes[key] = box
+            grid.addWidget(QLabel(label), i, 0)
+            grid.addWidget(box, i, 1)
+        holder = QWidget()
+        holder.setLayout(grid)
+        col.addWidget(holder)
+        bar = QHBoxLayout()
+        for text, slot in (("Save moves", self.save_motion),
+                           ("Defaults", self.reset_motion)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            bar.addWidget(b)
+        col.addLayout(bar)
+        self.motion_status = QLabel("Takes effect next time he starts.")
+        self.motion_status.setWordWrap(True)
+        col.addWidget(self.motion_status)
+        col.addStretch(1)
+        return col
+
+    # -- the clip list -----------------------------------------------------
+
+    def refresh_clips(self) -> None:
+        """Everything he can do: the authored clips first, then the built-ins."""
+        mine = list(self._document()["clips"])
+        self.mine = [c["name"] for c in mine]
+        built_in = [n for n in sorted(CLIPS) if n not in self.mine]
+        self.cliplist.blockSignals(True)
+        self.cliplist.clear()
+        for name in self.mine:
+            self.cliplist.addItem(QListWidgetItem(f"{name}   (yours - click to edit)"))
+        for name in built_in:
+            self.cliplist.addItem(QListWidgetItem(f"{name}   (built in)"))
+        self.cliplist.blockSignals(False)
+
+    def pick_clip(self, row: int) -> None:
+        if row < 0:
+            return
+        if row < len(self.mine):
+            for clip in self._document()["clips"]:
+                if clip["name"] == self.mine[row]:
+                    self.name.setText(clip["name"])
+                    self.duration.setValue(float(clip.get("duration", 1.6)))
+                    self.keys = list(clip.get("keys", []))
+                    self.refresh_keys()
+                    self.load_key(0)
+                    return
+        else:
+            name = self.cliplist.item(row).text().split()[0]
+            clip = CLIPS.get(name)
+            if clip:
+                self.render(clip.at(clip.duration * self.phase.value() / 100.0))
+                self.status.setText(
+                    f"'{name}' is built in - its shape lives in code. Its size and "
+                    "how often he picks it are on the right."
+                )
+
+    # -- the motion file ---------------------------------------------------
+
+    def _motion_document(self) -> dict:
+        path = self.poses_file.with_name("motion.json")
+        try:
+            doc = json.loads(path.read_text())
+            return doc if isinstance(doc, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def reset_motion(self) -> None:
+        for key, box in self.motion_boxes.items():
+            box.setValue(float(MOTION_DEFAULTS[key]))
+
+    def save_motion(self) -> None:
+        path = self.poses_file.with_name("motion.json")
+        doc = {k: round(b.value(), 2) for k, b in self.motion_boxes.items()}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(doc, indent=2) + "\n")
+        self.motion_status.setText(
+            f"wrote {path.name}. Takes effect next time he starts."
+        )
 
     # -- values ------------------------------------------------------------
 
@@ -332,4 +454,5 @@ class PoseEditor(QDialog):
             f"wrote {self.poses_file.name}: {len(doc['clips'])} clip(s). "
             "He will dance it next time he starts."
         )
+        self.refresh_clips()
         self.saved.emit(name)

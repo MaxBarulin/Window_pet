@@ -125,22 +125,26 @@ def test_no_limb_holds_material_behind_its_own_pivot(built, alpha):
         assert along.min() >= -(built.cut.cap_radius[name] + 1.5), name
 
 
-def test_every_joint_cap_fits_inside_the_silhouette(built, alpha):
-    """A cap has to be a full disc to be rotation-safe.
+def test_a_cap_reaches_across_its_parents_cut_end(built, alpha):
+    """The gap rule.
 
-    A disc trimmed by the outline changes shape as it turns, which is how the
-    knee ended up either torn open or poking out black corners.
+    A part is cut square at its far joint, so the child's cap has to be at least
+    half the limb's width there or a gap opens on the outside of every bend. That
+    is what tore the shoe away from the shin: at an ankle the shoe's curve pulls
+    the inscribed disc well under half the leg's width.
     """
     solid = alpha > 0.02
-    h, w = solid.shape
-    yy, xx = np.mgrid[0:h, 0:w]
+    segs = autorig.bone_segments(built.cut.joints, solid)
+    height = float(built.data["source_size"][1])
     for name, bone in autorig.BONES.items():
-        r = built.cut.cap_radius[name]
-        if r < 2.0:
-            continue  # on-outline pivot: there is no cap, the parent covers it
-        px, py = built.cut.joints[bone.pivot]
-        disc = (xx - px) ** 2 + (yy - py) ** 2 <= (r - 1) ** 2
-        assert not (disc & ~solid).any(), name
+        if bone.parent is None or bone.on_outline:
+            continue
+        pseg = segs[bone.parent]
+        pdir = autorig._norm(pseg[1][0] - pseg[0][0], pseg[1][1] - pseg[0][1])
+        need = autorig._half_chord(
+            solid, built.cut.joints[bone.pivot], pdir, height * 0.3
+        )
+        assert built.cut.cap_radius[name] >= need - 1.0, name
 
 
 def test_a_cap_is_wide_enough_to_cover_its_parents_cut_end(built):
@@ -242,7 +246,10 @@ def test_guessed_joints_are_close_enough_to_start_from(alpha, joints):
     height = built_height(alpha)
     for name in autorig.JOINT_ORDER:
         err = math.dist(guess[name], joints[name])
-        assert err < 0.06 * height, f"{name} guessed {err:.0f}px out"
+        # the tips are read off the silhouette rather than measured, so they only
+        # have to point the right way, not land on the exact pixel
+        allow = 0.13 if name in autorig.TIP_GUESS_FROM else 0.06
+        assert err < allow * height, f"{name} guessed {err:.0f}px out"
 
 
 def test_a_rig_built_purely_from_guesses_still_works(cutout, alpha):
