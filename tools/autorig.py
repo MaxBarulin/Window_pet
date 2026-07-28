@@ -594,8 +594,27 @@ def build(
     caps: dict[str, float] | None = None,
     splits: dict[str, float] | None = None,
     free: set[str] | None = None,
+    max_side: int | None = None,
 ) -> BuiltRig:
-    """Cut a background-free RGBA image into parts and describe the skeleton."""
+    """Cut a background-free RGBA image into parts and describe the skeleton.
+
+    `max_side` shrinks the photo first. The cut costs about a second at full
+    resolution, which is far too slow to drag a joint against, and a quarter-size
+    cut is the same cut - every measurement in here is a fraction of the figure,
+    so it lands in the same place. Use it for anything interactive and leave it
+    off for the parts that get written out.
+    """
+    if max_side:
+        longest = max(cutout.size)
+        if longest > max_side:
+            k = max_side / longest
+            cutout = cutout.resize(
+                (max(1, round(cutout.width * k)), max(1, round(cutout.height * k))),
+                Image.BILINEAR,
+            )
+            joints = {n: (x * k, y * k) for n, (x, y) in joints.items()}
+            caps = {n: v * k for n, v in (caps or {}).items()}
+            splits = {n: v * k for n, v in (splits or {}).items()}
     arr = np.asarray(cutout.convert("RGBA"))
     rgb = arr[..., :3]
     alpha = arr[..., 3].astype(np.float32) / 255.0

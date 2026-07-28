@@ -97,6 +97,11 @@ class BuildWorker(QObject):
 
     done = Signal(object, object, str)   # BuiltRig | None, previews, error
 
+    # Interactive builds run on a shrunk copy. The cut is identical - everything
+    # it measures is a fraction of the figure - and it is roughly six times
+    # faster, which is the difference between dragging a joint and waiting for it.
+    QUICK_SIDE = 420
+
     def __init__(self, height: int = 210):
         super().__init__()
         self.height = height
@@ -105,7 +110,7 @@ class BuildWorker(QObject):
             free: object) -> None:
         try:
             built = autorig.build(cutout, joints, caps=caps, splits=splits,
-                                  free=set(free))
+                                  free=set(free), max_side=self.QUICK_SIDE)
         except Exception as exc:  # a bad joint set is normal here, not a crash
             self.done.emit(None, None, str(exc))
             return
@@ -115,7 +120,7 @@ class BuildWorker(QObject):
             scale = self.height / rig.height()
             cw, ch = int(self.height * 1.25), int(self.height * 1.32)
             frames = []
-            for clip_name, phase in PREVIEW:
+            for clip_name, phase in PREVIEW[:3]:
                 clip = CLIPS[clip_name]
                 frames.append(
                     ren.draw(
@@ -407,9 +412,11 @@ class Editor(QMainWindow):
         self.setCentralWidget(root)
 
         self._start_worker()
+        self._busy = False
+        self._pending = False
         self.debounce = QTimer(self)
         self.debounce.setSingleShot(True)
-        self.debounce.setInterval(250)
+        self.debounce.setInterval(90)
         self.debounce.timeout.connect(self.rebuild)
 
         if start is not None:
@@ -627,6 +634,13 @@ class Editor(QMainWindow):
         if missing:
             self.status.setText(f"{len(missing)} still to place: {missing[0]}")
             return
+        if self._busy:
+            # A build is already running. Remember that the world moved on and
+            # re-fire once - queuing every drag event would just build a backlog
+            # of results nobody wants any more.
+            self._pending = True
+            return
+        self._busy = True
         self.status.setText("cutting...")
         self.build_requested.emit(
             self.cutout, dict(self.canvas.joints),
@@ -635,21 +649,29 @@ class Editor(QMainWindow):
         )
 
     def on_built(self, built, frames, error: str) -> None:
+        self._busy = False
+        if self._pending:
+            self._pending = False
+            self.debounce.start()
         if built is None:
             self.status.setText(error)
             self.export_button.setEnabled(False)
             return
         self.built = built
         self.export_button.setEnabled(True)
+        # the quick build ran on a shrunk copy, so everything it reports comes
+        # back in those pixels; the canvas works in the photo's own
+        k = self.cutout.width / float(built.data["source_size"][0])
         self.canvas.cap_shown = {
-            bone.pivot: built.cut.cap_radius[name]
+            bone.pivot: built.cut.cap_radius[name] * k
             for name, bone in autorig.BONES.items()
         }
         # Show where the shoulders were lifted to, but touch nothing else: the
         # user may well have dragged another joint while this build was running.
         for bone in autorig.BONES.values():
             if bone.on_outline and bone.pivot not in self.canvas.free:
-                self.canvas.joints[bone.pivot] = built.cut.joints[bone.pivot]
+                x, y = built.cut.joints[bone.pivot]
+                self.canvas.joints[bone.pivot] = (x * k, y * k)
         self.canvas.overlay = None
         if self.canvas.show_parts:
             self._make_overlay(built)
@@ -657,10 +679,13 @@ class Editor(QMainWindow):
         self.canvas.update()
         if frames:
             self.preview.setPixmap(pil_to_qpixmap(self._strip(frames)))
-        rest = built.data["rest_angles"]
+        sel = self.canvas.selected
+        cap = self.canvas.cap_shown.get(sel, 0.0)
+        split = self.canvas.splits.get(sel, 0.0)
         self.status.setText(
-            f"{len(built.images)} parts, {built.cut.unassigned * 100:.2f}% unclaimed. "
-            f"Arms rest at {rest['arm_l_upper']:.0f} deg."
+            f"{len(built.images)} parts, {built.cut.unassigned * 100:.2f}% unclaimed.\n"
+            f"{sel}: cap {cap:.0f}px"
+            + (f", seam {split:+.0f}px" if split else "")
             + (f"\n{error}" if error else "")
         )
 
@@ -733,15 +758,23 @@ class Editor(QMainWindow):
         if not target:
             return
         out = Path(target)
-        self.built.data["source"] = self.source_name
-        rig_json = autorig.write(self.built, out)
+        # everything on screen was cut from a shrunk copy; write the real one
+        self.status.setText("cutting at full size...")
+        QApplication.processEvents()
+        full = autorig.build(
+            self.cutout, dict(self.canvas.joints), self.source_name,
+            caps=dict(self.canvas.caps), splits=dict(self.canvas.splits),
+            free=set(self.canvas.free),
+        )
+        self.built = full
+        rig_json = autorig.write(full, out)
         # The matte and the points go with it. Without them the rig cannot be
         # rebuilt or re-edited, and they were only being written when the target
         # happened to be the repository's own assets folder.
         self.cutout.save(out / "cutout.png")
         autorig.save_joints(out / "joints.json", self.canvas.joints,
                             self.canvas.caps, self.canvas.splits, self.canvas.free)
-        self.status.setText(f"wrote cutout.png, joints.json, {rig_json.name} and {len(self.built.images)} part PNGs")
+        self.status.setText(f"wrote cutout.png, joints.json, {rig_json.name} and {len(full.images)} part PNGs")
 
 
 def main() -> None:
