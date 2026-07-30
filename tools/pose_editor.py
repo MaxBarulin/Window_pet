@@ -203,6 +203,7 @@ class PoseEditor(QDialog):
         clipbar = QHBoxLayout()
         for text, slot in (("Новое движение", self.new_clip),
                            ("Взять как основу", self.fork_builtin),
+                           ("Удалить моё движение", self.delete_clip),
                            ("Вернуть стандартное", self.delete_clip)):
             b = QPushButton(text)
             b.clicked.connect(slot)
@@ -401,20 +402,35 @@ class PoseEditor(QDialog):
         self.refresh_keys()
 
     def delete_clip(self) -> None:
-        """Remove an authored clip from the file. Built-in ones are not ours."""
+        """Remove an authored clip. Two buttons, one job.
+
+        Deleting your own movement and putting a standard one back are the same
+        operation - both drop an entry from poses.json - but they are not the same
+        intention, and one label cannot describe both. Hence two buttons.
+        """
         name = (self.name.text() or "").strip()
         doc = self._document()
         if not any(c.get("name") == name for c in doc["clips"]):
-            self.status.setText(f"«{name}» и так стандартное — удалять нечего")
+            self.status.setText(
+                f"«{name}» нет среди ваших движений — удалять нечего. "
+                "Выберите своё движение в списке."
+            )
             return
         doc["clips"] = [c for c in doc["clips"] if c.get("name") != name]
-        self.poses_file.write_text(json.dumps(doc, indent=2) + "\n")
-        back = " Стандартное вернётся." if name in BUILT_IN else ""
-        self.status.setText(
-            f"«{name}» удалено, своих осталось {len(doc['clips'])}.{back}"
-        )
+        try:
+            self.poses_file.write_text(
+                json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            self.status.setText(f"не удалось записать {self.poses_file}: {exc}")
+            return
+        back = " Стандартное вернулось." if name in BUILT_IN else ""
+        # after new_clip(), because that resets the keys and rewrites the status
         self.new_clip()
         self.refresh_clips()
+        self.status.setText(
+            f"«{name}» удалено. Своих движений осталось: {len(doc['clips'])}.{back}"
+        )
         self.saved.emit(name)
 
     # -- the motion file ---------------------------------------------------
@@ -585,9 +601,9 @@ class PoseEditor(QDialog):
         })
         self.poses_file.parent.mkdir(parents=True, exist_ok=True)
         self.poses_file.write_text(json.dumps(doc, indent=2) + "\n")
+        self.refresh_clips()
         self.status.setText(
             f"записано в {self.poses_file.name}, своих движений: {len(doc['clips'])}. "
             "Применится при следующем запуске."
         )
-        self.refresh_clips()
         self.saved.emit(name)

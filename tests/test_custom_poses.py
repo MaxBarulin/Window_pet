@@ -102,3 +102,31 @@ def test_motion_values_are_taken_from_the_file(tmp_path, monkeypatch):
     loaded = poses.load_motion()
     assert loaded["stride"] == 140.0
     assert loaded["bounce"] == poses.MOTION_DEFAULTS["bounce"]
+
+
+def test_deleting_a_clip_leaves_the_others(tmp_path):
+    """The editor's delete is a rewrite of the file; check the file, not the UI."""
+    path = tmp_path / "poses.json"
+    path.write_text(json.dumps({"clips": [
+        {"name": "mine", "duration": 1.2, "keys": KEYS},
+        {"name": "other", "duration": 1.2, "keys": KEYS},
+    ]}))
+    doc = json.loads(path.read_text())
+    doc["clips"] = [c for c in doc["clips"] if c.get("name") != "mine"]
+    path.write_text(json.dumps(doc))
+    assert set(load_clips(path)) == {"other"}
+
+
+def test_an_override_hides_the_built_in_and_deleting_it_brings_it_back(tmp_path):
+    from pet.poses import keyframe_clip
+
+    path = tmp_path / "poses.json"
+    path.write_text(json.dumps({"clips": [
+        {"name": "walk", "duration": 1.0, "keys": KEYS},
+    ]}))
+    override = load_clips(path)["walk"]
+    assert override.at(0.0).body == pytest.approx((0.0, 10.0))
+    # and the shipped one is still a separate object, untouched
+    assert CLIPS["walk"] is not override
+    path.write_text(json.dumps({"clips": []}))
+    assert load_clips(path) == {}
