@@ -109,16 +109,16 @@ class ReminderDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Window Pet - reminders")
+        self.setWindowTitle("Window Pet — напоминания")
         self.resize(560, 420)
 
         col = QVBoxLayout(self)
         col.addWidget(QLabel(
-            "He says these at the time on this machine's own clock, once a day."
+            "Он говорит это по часам этой машины, один раз в сутки."
         ))
 
         self.table = QTableWidget(0, 4, self)
-        self.table.setHorizontalHeaderLabels(["Time", "What he says", "On", "Mon-Fri"])
+        self.table.setHorizontalHeaderLabels(["Время", "Что говорит", "Вкл", "Пн-Пт"])
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -129,25 +129,25 @@ class ReminderDialog(QDialog):
         self.at.setDisplayFormat("HH:mm")
         entry.addWidget(self.at)
         self.text = QLineEdit()
-        self.text.setPlaceholderText("Time for lunch")
+        self.text.setPlaceholderText("Пора на обед")
         self.text.returnPressed.connect(self.add)
         entry.addWidget(self.text, 1)
-        self.weekdays = QCheckBox("Mon-Fri only")
+        self.weekdays = QCheckBox("только Пн-Пт")
         entry.addWidget(self.weekdays)
-        add = QPushButton("Add")
+        add = QPushButton("Добавить")
         add.clicked.connect(self.add)
         entry.addWidget(add)
         col.addLayout(entry)
 
         bar = QHBoxLayout()
-        for label, slot in (("Toggle on/off", self.toggle),
-                            ("Remove", self.remove),
-                            ("Try it", self.preview)):
+        for label, slot in (("Вкл/выкл", self.toggle),
+                            ("Удалить", self.remove),
+                            ("Проверить", self.preview)):
             b = QPushButton(label)
             b.clicked.connect(slot)
             bar.addWidget(b)
         bar.addStretch(1)
-        done = QPushButton("Save and close")
+        done = QPushButton("Сохранить и закрыть")
         done.clicked.connect(self.accept)
         bar.addWidget(done)
         col.addLayout(bar)
@@ -165,13 +165,13 @@ class ReminderDialog(QDialog):
         self.table.setRowCount(len(self.items))
         for row, r in enumerate(self.items):
             for col, value in enumerate((r.label(), r.text,
-                                         "yes" if r.enabled else "no",
-                                         "yes" if r.weekdays_only else "")):
+                                         "да" if r.enabled else "нет",
+                                         "да" if r.weekdays_only else "")):
                 cell = QTableWidgetItem(value)
                 if col != 1:
                     cell.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row, col, cell)
-        self.status.setText(f"{len(self.items)} reminder(s)")
+        self.status.setText(f"напоминаний: {len(self.items)}")
 
     def _row(self) -> int:
         return self.table.currentRow()
@@ -179,7 +179,7 @@ class ReminderDialog(QDialog):
     def add(self) -> None:
         text = self.text.text().strip()
         if not text:
-            self.status.setText("give him something to say")
+            self.status.setText("напишите, что он должен сказать")
             return
         t = self.at.time()
         self.items.append(Reminder(t.hour(), t.minute(), text,

@@ -207,10 +207,15 @@ limb and the automatic radius comes out shy.
 
 ### Everything he can do, and how much of it
 
-The pose editor lists every clip he has: the ones you authored, which load back
-in for editing, and the built-in ones. A built-in clip's *shape* stays in code —
-that is where the weight and the timing live — but its size and how often he
-picks it are on the right of that window and land in `assets/motion.json`:
+The pose editor lists every clip he has, yours first and the built-in ones after.
+Selecting any of them plays it. A built-in one cannot be keyframed directly — it
+is a function of phase, not a list of poses — but **Взять как основу** samples it
+into eight keyframes carrying the same name, and saving that *replaces* the
+standard one. **Вернуть стандартное** deletes the override and the original comes
+back, so nothing is ever lost by experimenting.
+
+Its size and how often he picks it are separate knobs on the right of that
+window, written to `assets/motion.json`:
 
 | Knob | What it changes |
 | --- | --- |
@@ -218,6 +223,8 @@ picks it are on the right of that window and land in `assets/motion.json`:
 | squat depth, dance bounce, side step | How big the dances are |
 | kazachok depth and kick reach | How low the squat dance sits and how far the kick shoots |
 | how often: walk / dance / stand / crouch / hop | What he picks when he is stood on something |
+
+The editor windows are in Russian; the code and this file are not.
 
 A missing or broken `motion.json` simply means the defaults.
 

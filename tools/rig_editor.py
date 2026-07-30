@@ -396,7 +396,7 @@ class Editor(QMainWindow):
 
     def __init__(self, start: Path | None = None):
         super().__init__()
-        self.setWindowTitle("Window Pet - rig editor")
+        self.setWindowTitle("Window Pet — разметка персонажа")
         self.resize(1280, 860)
         self.cutout: Image.Image | None = None
         self.built = None
@@ -431,17 +431,17 @@ class Editor(QMainWindow):
     def _side_panel(self) -> QVBoxLayout:
         col = QVBoxLayout()
 
-        col.addWidget(self._heading("1 - the photo"))
+        col.addWidget(self._heading("1 — фото"))
         self.photo_label = QLabel("no photo")
         self.photo_label.setWordWrap(True)
         col.addWidget(self.photo_label)
         bar = QHBoxLayout()
-        bar.addWidget(self._button("Open photo...", self.open_photo))
-        self.cut_button = self._button("Remove background", self.remove_background)
+        bar.addWidget(self._button("Открыть фото...", self.open_photo))
+        self.cut_button = self._button("Убрать фон", self.remove_background)
         bar.addWidget(self.cut_button)
         col.addLayout(bar)
 
-        col.addWidget(self._heading("2 - the joints"))
+        col.addWidget(self._heading("2 — суставы"))
         self.list = QListWidget()
         self.list.setFixedHeight(250)
         for name in autorig.JOINT_ORDER:
@@ -460,12 +460,12 @@ class Editor(QMainWindow):
         col.addWidget(note)
 
         bar = QHBoxLayout()
-        bar.addWidget(self._button("Guess them all", self.guess))
-        bar.addWidget(self._button("Load...", self.load_joints))
-        bar.addWidget(self._button("Save...", self.save_joints))
+        bar.addWidget(self._button("Расставить автоматически", self.guess))
+        bar.addWidget(self._button("Загрузить...", self.load_joints))
+        bar.addWidget(self._button("Сохранить...", self.save_joints))
         col.addLayout(bar)
 
-        self.pin_toggle = QCheckBox("Pin this pivot where I put it")
+        self.pin_toggle = QCheckBox("Закрепить ось там, где поставил")
         self.pin_toggle.setToolTip(
             "Shoulders are lifted to the top of the sleeve by default, because "
             "material above the pivot swings out as a wing. Pin one to keep it "
@@ -475,11 +475,11 @@ class Editor(QMainWindow):
         self.pin_toggle.toggled.connect(self.on_pin)
         col.addWidget(self.pin_toggle)
 
-        self.parts_toggle = QCheckBox("Show how it cut him up")
+        self.parts_toggle = QCheckBox("Показать нарезку по деталям")
         self.parts_toggle.toggled.connect(self.on_toggle_parts)
         col.addWidget(self.parts_toggle)
 
-        col.addWidget(self._heading("3 - the result"))
+        col.addWidget(self._heading("3 — результат"))
         self.preview = QLabel()
         self.preview.setMinimumHeight(290)
         self.preview.setAlignment(Qt.AlignCenter)
@@ -489,12 +489,12 @@ class Editor(QMainWindow):
         self.status.setWordWrap(True)
         col.addWidget(self.status)
 
-        col.addWidget(self._heading("4 - write it out"))
+        col.addWidget(self._heading("4 — записать"))
         self.export_button = self._button(
-            f"Write {ASSETS.name}/rig.json + parts", self.export
+            "Записать риг (rig.json + детали)", self.export
         )
         col.addWidget(self.export_button)
-        self.pose_button = self._button("Make him a new dance...", self.open_poses)
+        self.pose_button = self._button("Движения и танцы...", self.open_poses)
         col.addWidget(self.pose_button)
         hint = QLabel("Then rebuild the exe, or just run <code>python -m pet</code>.")
         hint.setStyleSheet("color:#888;")

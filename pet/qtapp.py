@@ -416,7 +416,7 @@ class PetWindow(QWidget):
 
         about = QAction("About", m)
         about.triggered.connect(self._about)
-        rem = QAction("Reminders...", m)
+        rem = QAction("Напоминания...", m)
         rem.triggered.connect(self.edit_reminders)
         m.addAction(rem)
 
