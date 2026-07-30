@@ -49,6 +49,8 @@ from .behavior import Behavior, Pet, State
 from .desktop import Snapshot, make_desktop
 from .kinematics import Skeleton
 from .poses import CLIPS
+from .remind_ui import Bubble, ReminderDialog
+from .reminders import Schedule
 from .rigmath import Matrix, Pose, Rig
 
 PAD = 8  # px of slack around the worst-case bounding box
@@ -143,6 +145,10 @@ class PetWindow(QWidget):
         # plenty to make a 30-60 fps animation look uneven
         self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.timeout.connect(self._tick)
+
+        # things he says at a time of day, off this machine's clock
+        self.schedule = Schedule()
+        self.bubble = Bubble()
         self.timer.start(int(1000 / max(1, settings.fps)))
 
     # -- setup ------------------------------------------------------------
@@ -229,6 +235,14 @@ class PetWindow(QWidget):
 
         self._render()
 
+        for reminder in self.schedule.due():
+            self.say(reminder.text)
+
+    def say(self, text: str, seconds: float = 6.0) -> None:
+        """Put a speech bubble over his head."""
+        top = self.mapToGlobal(QPoint(self.width() // 2, 0))
+        self.bubble.say(text, top + QPoint(0, -4), seconds)
+
     def _current_pose(self) -> Pose:
         p = self.behavior.pet
         clip = CLIPS.get(p.clip, CLIPS["idle"])
@@ -285,6 +299,11 @@ class PetWindow(QWidget):
         painter.drawImage(0, 0, self._frame)
 
     # -- interaction ------------------------------------------------------
+
+    def edit_reminders(self) -> None:
+        dlg = ReminderDialog(self)
+        dlg.exec()
+        self.schedule.reload()
 
     def _opaque_at(self, pos: QPoint) -> bool:
         if self._frame is None:
@@ -397,6 +416,10 @@ class PetWindow(QWidget):
 
         about = QAction("About", m)
         about.triggered.connect(self._about)
+        rem = QAction("Reminders...", m)
+        rem.triggered.connect(self.edit_reminders)
+        m.addAction(rem)
+
         m.addAction(about)
 
         quit_act = QAction("Quit", m)

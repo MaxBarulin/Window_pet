@@ -55,8 +55,23 @@ Send that file — it names the actual failure.
 | Double-click | Dance on demand. |
 | Right-click (or tray icon) | Menu: dance, pause, size, click-through, re-centre, quit. |
 | Tray icon, single click | Dance on demand. |
+| Right-click → Reminders… | What he says, and when. |
 
 Settings persist to `%APPDATA%\WindowPet\settings.json`.
+
+## Reminders
+
+**Reminders…** in his menu is a time and a line to say. He says it in a speech
+bubble over his head at that time on this machine's own clock, once a day,
+optionally weekdays only. They live in `%APPDATA%\WindowPet\reminders.json`, so
+they survive a rebuild, and **Try it** in that window shows you where the bubble
+lands before you commit to it.
+
+Anything already past when he starts is water under the bridge — a machine
+switched on at six in the evening owes you no lunch reminder. The bubble is its
+own click-through window rather than part of his canvas: the canvas is a fixed
+size cut to the widest pose any clip reaches, and growing it per frame is the
+resize that used to make him stutter.
 
 ## How he reads your desktop
 

@@ -19,6 +19,8 @@ from PIL import Image
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
+    QFormLayout,
+    QSpinBox,
     QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
@@ -114,6 +116,23 @@ MOTION_LABELS = {
 }
 
 
+class Dial(QSlider):
+    """A slider whose wheel moves it one step, not three.
+
+    Qt scrolls a slider by `wheelScrollLines` steps a notch, which is three by
+    default. On a control measured in degrees that makes fine adjustment
+    impossible - which is the only kind of adjustment posing needs.
+    """
+
+    def wheelEvent(self, event):  # noqa: N802 - Qt
+        notches = event.angleDelta().y() / 120.0
+        if notches:
+            self.setValue(int(round(self.value() + notches)))
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+
 class PoseEditor(QDialog):
     """Keyframe editor for one clip."""
 
@@ -197,26 +216,39 @@ class PoseEditor(QDialog):
         left.addWidget(self.status)
         row.addLayout(left, 3)
 
-        grid = QGridLayout()
-        for i, (name, label, lo, hi, default) in enumerate(CONTROLS):
-            s = QSlider(Qt.Horizontal)
-            s.setRange(lo, hi)
-            s.setValue(default)
-            s.setSingleStep(1)
-            s.setPageStep(10)   # one wheel notch is one unit, not three
-            s.valueChanged.connect(self.on_slider)
-            self.sliders[name] = s
-            out = QLabel(str(default))
-            out.setMinimumWidth(38)
-            self.readouts[name] = out
-            grid.addWidget(QLabel(label), i, 0)
-            grid.addWidget(s, i, 1)
-            grid.addWidget(out, i, 2)
+        # One row per control: the label above, then the slider and a box you can
+        # type an exact number into. Thirteen bare sliders in a column was not
+        # something anyone could aim with.
+        form = QVBoxLayout()
+        form.addWidget(QLabel("<b>The pose</b>"))
+        for name, label, lo, hi, default in CONTROLS:
+            form.addWidget(QLabel(label))
+            line = QHBoxLayout()
+            slider = Dial(Qt.Horizontal)
+            slider.setRange(lo, hi)
+            slider.setValue(default)
+            slider.setSingleStep(1)
+            slider.setPageStep(10)
+            slider.setTickPosition(QSlider.TicksBelow)
+            slider.setTickInterval(max(1, (hi - lo) // 12))
+            box = QSpinBox()
+            box.setRange(lo, hi)
+            box.setValue(default)
+            box.setFixedWidth(64)
+            slider.valueChanged.connect(box.setValue)
+            box.valueChanged.connect(slider.setValue)
+            slider.valueChanged.connect(self.on_slider)
+            self.sliders[name] = slider
+            self.readouts[name] = box
+            line.addWidget(slider, 1)
+            line.addWidget(box)
+            form.addLayout(line)
         reset = QPushButton("Back to standing")
         reset.clicked.connect(self.reset)
-        grid.addWidget(reset, len(CONTROLS), 0, 1, 3)
+        form.addWidget(reset)
+        form.addStretch(1)
         holder = QWidget()
-        holder.setLayout(grid)
+        holder.setLayout(form)
         row.addWidget(holder, 2)
 
         self.motion_boxes: dict[str, QDoubleSpinBox] = {}
@@ -235,6 +267,7 @@ class PoseEditor(QDialog):
         for i, (key, label) in enumerate(MOTION_LABELS.items()):
             box = QDoubleSpinBox()
             box.setRange(0.0, 400.0)
+            box.setKeyboardTracking(False)
             box.setSingleStep(0.1 if key.startswith(("weight", "walk_s")) else 2.0)
             box.setDecimals(2 if key.startswith(("weight", "walk_s")) else 0)
             box.setValue(float(current.get(key, MOTION_DEFAULTS[key])))
@@ -246,7 +279,7 @@ class PoseEditor(QDialog):
         col.addWidget(holder)
         bar = QHBoxLayout()
         for text, slot in (("Save moves", self.save_motion),
-                           ("Defaults", self.reset_motion)):
+                           ("Reset all to standard", self.reset_motion)):
             b = QPushButton(text)
             b.clicked.connect(slot)
             bar.addWidget(b)
@@ -354,15 +387,15 @@ class PoseEditor(QDialog):
             slider.blockSignals(True)
             slider.setValue(int(round(v.get(name, 0.0))))
             slider.blockSignals(False)
-            self.readouts[name].setText(str(slider.value()))
+            self.readouts[name].blockSignals(True)
+            self.readouts[name].setValue(slider.value())
+            self.readouts[name].blockSignals(False)
         self.render()
 
     def reset(self) -> None:
         self.set_values({n: d for n, _l, _lo, _hi, d in CONTROLS})
 
     def on_slider(self) -> None:
-        for name, slider in self.sliders.items():
-            self.readouts[name].setText(str(slider.value()))
         self.render()
 
     # -- preview -----------------------------------------------------------
