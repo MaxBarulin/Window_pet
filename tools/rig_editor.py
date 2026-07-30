@@ -740,11 +740,18 @@ class Editor(QMainWindow):
         )
         if not name:
             return
-        points, caps, splits, free = autorig.load_joints(Path(name))
+        try:
+            # load_joints has grown a field or two over time; take the first four
+            # by position so an extra one cannot break the unpack again.
+            points, caps, splits, free = autorig.load_joints(Path(name))[:4]
+        except (OSError, ValueError, KeyError) as exc:
+            self.status.setText(f"не удалось прочитать {Path(name).name}: {exc}")
+            return
         (self.canvas.joints, self.canvas.caps,
          self.canvas.splits, self.canvas.free) = points, caps, splits, free
         self.canvas.update()
         self.on_joints_changed()
+        self.status.setText(f"загружено {Path(name).name}")
 
     def save_joints(self) -> None:
         name, _ = QFileDialog.getSaveFileName(
@@ -754,7 +761,7 @@ class Editor(QMainWindow):
             autorig.save_joints(Path(name), self.canvas.joints,
                                 self.canvas.caps, self.canvas.splits,
                                 self.canvas.free)
-            self.status.setText(f"wrote {name}")
+            self.status.setText(f"сохранено {Path(name).name}")
 
     def export(self) -> None:
         if self.built is None:
