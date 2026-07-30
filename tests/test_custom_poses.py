@@ -130,3 +130,40 @@ def test_an_override_hides_the_built_in_and_deleting_it_brings_it_back(tmp_path)
     assert CLIPS["walk"] is not override
     path.write_text(json.dumps({"clips": []}))
     assert load_clips(path) == {}
+
+
+def test_an_edited_walk_keeps_its_travel_speed(tmp_path):
+    """The bug: a keyframed clip that replaces a built-in defaulted to speed 0.
+
+    An edited walk with no speed field must inherit the built-in walk's speed, or
+    he walks on the spot instead of crossing the screen.
+    """
+    from pet.poses import CLIPS, load_clips
+
+    path = tmp_path / "poses.json"
+    path.write_text(json.dumps({"clips": [
+        {"name": "walk", "duration": 1.02, "keys": KEYS},
+    ]}))
+    edited = load_clips(path)["walk"]
+    assert edited.speed == pytest.approx(CLIPS["walk"].speed)
+    assert edited.speed > 0.0
+
+
+def test_an_explicit_speed_is_respected(tmp_path):
+    from pet.poses import load_clips
+
+    path = tmp_path / "poses.json"
+    path.write_text(json.dumps({"clips": [
+        {"name": "walk", "duration": 1.0, "speed": 0.0, "keys": KEYS},
+    ]}))
+    assert load_clips(path)["walk"].speed == 0.0
+
+
+def test_a_brand_new_clip_has_no_travel(tmp_path):
+    from pet.poses import load_clips
+
+    path = tmp_path / "poses.json"
+    path.write_text(json.dumps({"clips": [
+        {"name": "brand_new", "duration": 1.0, "keys": KEYS},
+    ]}))
+    assert load_clips(path)["brand_new"].speed == 0.0

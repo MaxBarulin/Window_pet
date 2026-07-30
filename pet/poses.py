@@ -624,11 +624,20 @@ def keyframe_clip(spec: dict) -> Clip:
             return poses[-1]
         return _blend(poses[-1], poses[0], (p - phases[-1]) / span)
 
+    # A clip that replaces a built-in one, but says nothing about speed, inherits
+    # it. Otherwise an edited walk that omits the field would default to speed 0
+    # and walk on the spot - the field is easy to lose and impossible to guess by
+    # hand, but the built-in it shadows already knows the answer.
+    speed = spec.get("speed")
+    if speed is None:
+        existing = CLIPS.get(str(spec["name"]))
+        speed = existing.speed if existing is not None else 0.0
+
     return Clip(
         name=str(spec["name"]),
         duration=max(0.15, float(spec.get("duration", 1.6))),
         fn=fn,
-        speed=float(spec.get("speed", 0.0)),
+        speed=float(speed),
         loop=loop,
     )
 

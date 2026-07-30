@@ -35,12 +35,13 @@ from PySide6.QtWidgets import (
 )
 
 from pet.kinematics import BASE_CROUCH, PoseSpec
-from pet.poses import CLIPS, MOTION_DEFAULTS, keyframe_clip, load_clips
+from pet.poses import CLIPS, DANCES, MOTION_DEFAULTS, keyframe_clip, load_clips
 
 # The standard movements as they ship, captured before anything in poses.json has
 # had a chance to replace one of them by name. Without this snapshot there is no
 # original left to sample or to go back to.
 BUILT_IN = dict(CLIPS)
+BUILT_IN_DANCES = set(DANCES)
 
 
 def spec_to_values(spec) -> dict[str, float]:
@@ -590,17 +591,27 @@ class PoseEditor(QDialog):
             self.status.setText(str(exc))
             return
 
+        # When this clip replaces a standard one, it has to keep what the standard
+        # one did beyond its shape: how fast it carries him across the screen, and
+        # whether it counts as a dance or as getting-about. A walk with no speed
+        # walks on the spot - which is exactly the bug this guards against.
+        original = BUILT_IN.get(name)
         doc = self._document()
         doc["clips"] = [c for c in doc["clips"] if c.get("name") != name]
-        doc["clips"].append({
+        clip = {
             "name": name,
             "duration": round(self.duration.value(), 2),
-            "loop": True,
-            "dance": True,
+            "loop": original.loop if original else True,
+            "dance": (name in BUILT_IN_DANCES) if original else True,
             "keys": self.keys,
-        })
+        }
+        if original and original.speed:
+            clip["speed"] = round(original.speed, 6)
+        doc["clips"].append(clip)
         self.poses_file.parent.mkdir(parents=True, exist_ok=True)
-        self.poses_file.write_text(json.dumps(doc, indent=2) + "\n")
+        self.poses_file.write_text(
+            json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
         self.refresh_clips()
         self.status.setText(
             f"записано в {self.poses_file.name}, своих движений: {len(doc['clips'])}. "
