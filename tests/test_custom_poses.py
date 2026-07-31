@@ -167,3 +167,32 @@ def test_a_brand_new_clip_has_no_travel(tmp_path):
         {"name": "brand_new", "duration": 1.0, "keys": KEYS},
     ]}))
     assert load_clips(path)["brand_new"].speed == 0.0
+
+
+def test_a_disabled_dance_leaves_the_pool(tmp_path, monkeypatch):
+    import pet.poses as poses
+
+    (tmp_path / "motion.json").write_text(
+        json.dumps({"disabled": ["kazachok"]}), encoding="utf-8")
+    monkeypatch.setattr(poses, "_assets_dir", lambda: tmp_path)
+    assert "kazachok" in poses.disabled_clips()
+
+
+def test_a_cyrillic_clip_name_survives_the_round_trip(tmp_path):
+    from pet.poses import load_clips
+
+    path = tmp_path / "poses.json"
+    path.write_text(
+        json.dumps({"clips": [{"name": "пляс", "duration": 1.2, "keys": KEYS}]},
+                   ensure_ascii=False),
+        encoding="utf-8",
+    )
+    assert set(load_clips(path)) == {"пляс"}
+
+
+def test_a_broken_motion_file_disables_nothing(tmp_path, monkeypatch):
+    import pet.poses as poses
+
+    (tmp_path / "motion.json").write_text("{ not json", encoding="utf-8")
+    monkeypatch.setattr(poses, "_assets_dir", lambda: tmp_path)
+    assert poses.disabled_clips() == set()

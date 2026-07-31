@@ -1,13 +1,17 @@
-"""Pose him by hand, keyframe it, and save it as a dance he will actually do.
+"""Two editors in one window: the standard movements, and the ones you make.
 
 Clips in `pet/poses.py` are procedural - functions of phase - because that is how
-you get motion that reads as weight rather than as a slideshow. This is the other
-way in: drag him into a shape, drop a keyframe, repeat, save. The result lands in
-`assets/poses.json`, `pet/poses.py` picks it up at import, and it joins the pool
-he picks dances from.
+you get motion that reads as weight rather than as a slideshow. This window has
+two tabs:
 
-The sliders are a `PoseSpec`, so the legs are still driven by *where the feet are*
-and solved with IK. You are placing feet and hips, not bending knees.
+* **Стандартные** - the built-in movements. Each can be switched out of the pool
+  he picks from, retuned (how big, how often), or forked into keyframes to edit.
+* **Мои движения** - the keyframe editor. Pose him with sliders, drop keyframes,
+  save. A saved clip lands in `assets/poses.json` and joins the pool; giving it
+  the name of a standard one replaces that standard one.
+
+The sliders are a `PoseSpec`, so the legs are driven by *where the feet are* and
+solved with IK. You place feet and hips, not knee angles.
 """
 
 from __future__ import annotations
@@ -19,8 +23,6 @@ from PIL import Image
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
-    QFormLayout,
-    QSpinBox,
     QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
@@ -30,37 +32,36 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSlider,
+    QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from pet.kinematics import BASE_CROUCH, PoseSpec
-from pet.poses import CLIPS, DANCES, MOTION_DEFAULTS, keyframe_clip, load_clips
-
-# The standard movements as they ship, captured before anything in poses.json has
-# had a chance to replace one of them by name. Without this snapshot there is no
-# original left to sample or to go back to.
-BUILT_IN = dict(CLIPS)
-BUILT_IN_DANCES = set(DANCES)
-
-
-def spec_to_values(spec) -> dict[str, float]:
-    """A PoseSpec back into slider values, for sampling a built-in clip."""
-    return {
-        "body_x": spec.body[0], "body_y": spec.body[1],
-        "lean": spec.lean, "torso": spec.torso, "head": spec.head,
-        "arm_l_upper": spec.arm_l_upper, "arm_l_fore": spec.arm_l_fore,
-        "arm_r_upper": spec.arm_r_upper, "arm_r_fore": spec.arm_r_fore,
-        "foot_l_x": spec.foot_l[0], "foot_l_y": spec.foot_l[1],
-        "foot_r_x": spec.foot_r[0], "foot_r_y": spec.foot_r[1],
-    }
+from pet.poses import CLIPS, DANCES, MOTION_DEFAULTS, keyframe_clip
 from pet.rigmath import Rig
 from tools.render_preview import PilRenderer
 
-# name, label, min, max, default, in source pixels and degrees. Every angle goes
-# the whole way round: a cutout past about 40 degrees at a joint starts to look
-# rubbery, but that is a judgement for whoever is posing him, not a limit to
-# enforce - and some poses genuinely need an arm all the way over.
+# The standard movements as they ship, captured before anything in poses.json has
+# had a chance to replace one of them by name. Without this snapshot there is no
+# original left to sample, to play, or to go back to.
+BUILT_IN = dict(CLIPS)
+BUILT_IN_DANCES = set(DANCES)
+
+# Names shown in Russian; the JSON keys and the code stay ASCII.
+CLIP_NAMES_RU = {
+    "idle": "стоит", "walk": "ходьба", "crouch": "присед",
+    "hiphop": "хип-хоп", "step_touch": "шаг в сторону", "kazachok": "казачок",
+    "hop_step": "подскок", "shimmy": "шимми", "contemporary": "контемп",
+    "sit_dance": "танец сидя", "lean": "облокотиться", "wave": "машет",
+    "jump_air": "прыжок", "fall": "падение", "land": "приземление",
+    "dragged": "когда несут",
+}
+
+# name, label, min, max, default, in source pixels and degrees. Every angle turns
+# the whole way round - a cutout past ~40 degrees at a joint looks rubbery, but
+# that is a judgement for whoever poses him, not a limit to enforce.
 CONTROLS = [
     ("body_x", "Таз влево/вправо", -90, 90, 0),
     ("body_y", "Таз вверх/вниз", -60, 150, int(BASE_CROUCH)),
@@ -76,6 +77,37 @@ CONTROLS = [
     ("foot_r_x", "Правая стопа влево/вправо", -200, 200, 0),
     ("foot_r_y", "Правая стопа вверх", -180, 40, 0),
 ]
+
+# The size knobs, grouped by which movement they belong to. Grouping is the whole
+# point: a flat list of thirteen numbers said nothing about what each one did.
+MOTION_GROUPS = [
+    ("Ходьба", [
+        ("stride", "Длина шага, px"),
+        ("step_lift", "Подъём ноги при шаге, px"),
+        ("walk_seconds", "Секунд на один цикл"),
+    ]),
+    ("Присед", [
+        ("squat_depth", "Глубина приседа, px"),
+    ]),
+    ("Танцы — размах", [
+        ("bounce", "Качание вверх-вниз, px"),
+        ("side_step", "Шаг в сторону, px"),
+    ]),
+    ("Казачок", [
+        ("kazachok_depth", "Глубина, px"),
+        ("kick_reach", "Вылет ноги, px"),
+    ]),
+    ("Как часто он это выбирает (вес, 0 = никогда)", [
+        ("weight_walk", "Ходить"),
+        ("weight_dance", "Танцевать"),
+        ("weight_idle", "Стоять"),
+        ("weight_crouch", "Приседать"),
+        ("weight_hop", "Подпрыгивать"),
+    ]),
+]
+
+# How many keyframes a built-in clip is sampled into when you fork it.
+FORK_KEYS = 8
 
 
 def values_to_spec(v: dict[str, float]) -> PoseSpec:
@@ -114,36 +146,24 @@ def key_to_values(key: dict) -> dict[str, float]:
     return out
 
 
-# The built-in clips are procedural - functions of phase - so they cannot be
-# keyframed here. What can be changed is how big they are, and how often he picks
-# them. Anything that would change the *shape* of a move stays in code.
-MOTION_LABELS = {
-    "stride": "Длина шага, px",
-    "step_lift": "Подъём ноги при шаге, px",
-    "squat_depth": "Глубина приседа, px",
-    "bounce": "Качание в танце, px",
-    "side_step": "Шаг в сторону, px",
-    "kazachok_depth": "Глубина казачка, px",
-    "kick_reach": "Вылет ноги в казачке, px",
-    "walk_seconds": "Секунд на цикл ходьбы",
-    "weight_walk": "Как часто: ходит",
-    "weight_dance": "Как часто: танцует",
-    "weight_idle": "Как часто: стоит",
-    "weight_crouch": "Как часто: приседает",
-    "weight_hop": "Как часто: подпрыгивает",
-}
-
-# How many keyframes a built-in clip is sampled into when you fork it. Enough to
-# keep the shape recognisable, few enough to be editable by hand.
-FORK_KEYS = 8
+def spec_to_values(spec) -> dict[str, float]:
+    """A PoseSpec back into slider values, for sampling a built-in clip."""
+    return {
+        "body_x": spec.body[0], "body_y": spec.body[1],
+        "lean": spec.lean, "torso": spec.torso, "head": spec.head,
+        "arm_l_upper": spec.arm_l_upper, "arm_l_fore": spec.arm_l_fore,
+        "arm_r_upper": spec.arm_r_upper, "arm_r_fore": spec.arm_r_fore,
+        "foot_l_x": spec.foot_l[0], "foot_l_y": spec.foot_l[1],
+        "foot_r_x": spec.foot_r[0], "foot_r_y": spec.foot_r[1],
+    }
 
 
 class Dial(QSlider):
     """A slider whose wheel moves it one step, not three.
 
-    Qt scrolls a slider by `wheelScrollLines` steps a notch, which is three by
-    default. On a control measured in degrees that makes fine adjustment
-    impossible - which is the only kind of adjustment posing needs.
+    Qt scrolls a slider by `wheelScrollLines` steps a notch, three by default. On
+    a control in degrees that makes fine adjustment - the only kind posing needs -
+    impossible.
     """
 
     def wheelEvent(self, event):  # noqa: N802 - Qt
@@ -156,74 +176,157 @@ class Dial(QSlider):
 
 
 class PoseEditor(QDialog):
-    """Keyframe editor for one clip."""
-
     saved = Signal(str)
 
     def __init__(self, rig: Rig, images: dict[str, Image.Image], poses_file: Path,
                  parent: QWidget | None = None, height: int = 300):
         super().__init__(parent)
         self.setWindowTitle("Window Pet — движения")
-        self.resize(940, 720)
+        self.resize(1040, 760)
         self.poses_file = Path(poses_file)
+        self.motion_file = self.poses_file.with_name("motion.json")
         self.renderer = PilRenderer(rig, images)
         self.scale = height / rig.height()
         self.canvas_size = (int(height * 1.5), int(height * 1.45))
         self.anchor = (self.canvas_size[0] / 2, self.canvas_size[1] - height * 0.10)
-        self.keys: list[dict] = []
-        self.builtin = ""
-        self.sliders: dict[str, QSlider] = {}
-        self.readouts: dict[str, QLabel] = {}
 
-        row = QHBoxLayout(self)
+        self.keys: list[dict] = []
+        self.builtin = ""                       # standard clip selected on tab 1
+        self.sliders: dict[str, QSlider] = {}
+        self.readouts: dict[str, QSpinBox] = {}
+        self.motion_boxes: dict[str, QDoubleSpinBox] = {}
+
+        outer = QHBoxLayout(self)
+
+        # left column: the live preview, shared by both tabs
         left = QVBoxLayout()
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setStyleSheet("background:#2a2a2e; border-radius:4px;")
         self.preview.setMinimumSize(*self.canvas_size)
         left.addWidget(self.preview)
-
-        left.addWidget(QLabel("Все его движения. Свои — правятся ключами, "
-                              "стандартные — сначала «Взять как основу»."))
-        self.cliplist = QListWidget()
-        self.cliplist.setFixedHeight(120)
-        self.cliplist.currentRowChanged.connect(self.pick_clip)
-        left.addWidget(self.cliplist)
-
-        left.addWidget(QLabel("Где в цикле стоит эта поза"))
+        left.addWidget(QLabel("Фаза цикла (для проигрывания и ключей)"))
         self.phase = QSlider(Qt.Horizontal)
         self.phase.setRange(0, 100)
         self.phase.valueChanged.connect(self.on_phase)
         left.addWidget(self.phase)
+        play = QPushButton("Проиграть выбранное")
+        play.clicked.connect(self.play)
+        left.addWidget(play)
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        left.addWidget(self.status)
+        left.addStretch(1)
+        outer.addLayout(left, 3)
 
-        self.keylist = QListWidget()
-        self.keylist.setFixedHeight(130)
-        self.keylist.currentRowChanged.connect(self.load_key)
-        left.addWidget(self.keylist)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._standard_tab(), "Стандартные")
+        self.tabs.addTab(self._custom_tab(), "Мои движения")
+        self.tabs.currentChanged.connect(lambda _i: self.on_phase())
+        outer.addWidget(self.tabs, 5)
 
-        clipbar = QHBoxLayout()
-        for text, slot in (("Новое движение", self.new_clip),
-                           ("Взять как основу", self.fork_builtin),
-                           ("Удалить моё движение", self.delete_clip),
-                           ("Вернуть стандартное", self.delete_clip)):
-            b = QPushButton(text)
-            b.clicked.connect(slot)
-            clipbar.addWidget(b)
-        left.addLayout(clipbar)
+        self.refresh_standard()
+        self.refresh_mine()
+        self.reset()
+        self.render()
+
+    # ------------------------------------------------------------------ tab 1
+    def _standard_tab(self) -> QWidget:
+        w = QWidget()
+        col = QVBoxLayout(w)
+        col.addWidget(QLabel(
+            "Галочка — участвует ли движение в наборе. Снимите её у стандартного, "
+            "и вместо него будут чаще выпадать ваши."))
+        self.stdlist = QListWidget()
+        self.stdlist.setFixedHeight(210)
+        self.stdlist.currentRowChanged.connect(self.pick_standard)
+        self.stdlist.itemChanged.connect(self._toggle_enabled)
+        col.addWidget(self.stdlist)
 
         bar = QHBoxLayout()
-        for text, slot in (("Поставить ключ", self.add_key),
-                           ("Заменить", self.replace_key),
-                           ("Удалить ключ", self.delete_key),
-                           ("Проиграть", self.play)):
+        for text, slot in (("Редактировать (в «Мои движения»)", self.fork_to_custom),
+                           ("Вернуть стандартное", self.revert_builtin)):
             b = QPushButton(text)
             b.clicked.connect(slot)
             bar.addWidget(b)
-        left.addLayout(bar)
+        col.addLayout(bar)
+
+        col.addWidget(QLabel("<b>Размеры и частота движений</b>"))
+        col.addWidget(QLabel("В пикселях фото и секундах. Больше — крупнее/дольше."))
+        grid = QGridLayout()
+        current = self._motion_document()
+        r = 0
+        for group, keys in MOTION_GROUPS:
+            head = QLabel(f"<b>{group}</b>")
+            grid.addWidget(head, r, 0, 1, 2)
+            r += 1
+            for key, label in keys:
+                box = QDoubleSpinBox()
+                box.setKeyboardTracking(False)
+                weightish = key.startswith("weight") or key == "walk_seconds"
+                box.setRange(0.0, 20.0 if key.startswith("weight") else 400.0)
+                box.setSingleStep(0.1 if weightish else 2.0)
+                box.setDecimals(2 if weightish else 0)
+                box.setValue(float(current.get(key, MOTION_DEFAULTS[key])))
+                self.motion_boxes[key] = box
+                grid.addWidget(QLabel(label), r, 0)
+                grid.addWidget(box, r, 1)
+                r += 1
+        holder = QWidget()
+        holder.setLayout(grid)
+        col.addWidget(holder)
+
+        mbar = QHBoxLayout()
+        for text, slot in (("Сохранить настройки", self.save_motion),
+                           ("Сбросить к стандарту", self.reset_motion)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            mbar.addWidget(b)
+        col.addLayout(mbar)
+        self.motion_status = QLabel("Применится при следующем запуске.")
+        self.motion_status.setWordWrap(True)
+        col.addWidget(self.motion_status)
+        col.addStretch(1)
+        return w
+
+    # ------------------------------------------------------------------ tab 2
+    def _custom_tab(self) -> QWidget:
+        w = QWidget()
+        row = QHBoxLayout(w)
+
+        col = QVBoxLayout()
+        col.addWidget(QLabel("Ваши движения:"))
+        self.cliplist = QListWidget()
+        self.cliplist.setFixedHeight(140)
+        self.cliplist.currentRowChanged.connect(self.pick_mine)
+        col.addWidget(self.cliplist)
+
+        cbar = QHBoxLayout()
+        for text, slot in (("Новое", self.new_clip),
+                           ("Удалить моё", self.delete_clip)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            cbar.addWidget(b)
+        col.addLayout(cbar)
+
+        col.addWidget(QLabel("Ключи движения:"))
+        self.keylist = QListWidget()
+        self.keylist.setFixedHeight(120)
+        self.keylist.currentRowChanged.connect(self.load_key)
+        col.addWidget(self.keylist)
+
+        kbar = QHBoxLayout()
+        for text, slot in (("Поставить ключ", self.add_key),
+                           ("Заменить", self.replace_key),
+                           ("Удалить ключ", self.delete_key)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            kbar.addWidget(b)
+        col.addLayout(kbar)
 
         meta = QHBoxLayout()
         meta.addWidget(QLabel("название"))
-        self.name = QLineEdit("my_dance")
+        self.name = QLineEdit("moy_tanec")
         meta.addWidget(self.name)
         meta.addWidget(QLabel("секунд"))
         self.duration = QDoubleSpinBox()
@@ -231,19 +334,14 @@ class PoseEditor(QDialog):
         self.duration.setSingleStep(0.1)
         self.duration.setValue(1.6)
         meta.addWidget(self.duration)
+        col.addLayout(meta)
         save = QPushButton("Сохранить движение")
         save.clicked.connect(self.save)
-        meta.addWidget(save)
-        left.addLayout(meta)
+        col.addWidget(save)
+        col.addStretch(1)
+        row.addLayout(col, 2)
 
-        self.status = QLabel("Поставьте хотя бы два ключа и сохраните.")
-        self.status.setWordWrap(True)
-        left.addWidget(self.status)
-        row.addLayout(left, 3)
-
-        # One row per control: the label above, then the slider and a box you can
-        # type an exact number into. Thirteen bare sliders in a column was not
-        # something anyone could aim with.
+        # the pose: one row per control, label above, slider plus a typed box
         form = QVBoxLayout()
         form.addWidget(QLabel("<b>Поза</b>"))
         for name, label, lo, hi, default in CONTROLS:
@@ -252,7 +350,6 @@ class PoseEditor(QDialog):
             slider = Dial(Qt.Horizontal)
             slider.setRange(lo, hi)
             slider.setValue(default)
-            slider.setSingleStep(1)
             slider.setPageStep(10)
             slider.setTickPosition(QSlider.TicksBelow)
             slider.setTickInterval(max(1, (hi - lo) // 12))
@@ -275,127 +372,130 @@ class PoseEditor(QDialog):
         holder = QWidget()
         holder.setLayout(form)
         row.addWidget(holder, 2)
+        return w
 
-        self.motion_boxes: dict[str, QDoubleSpinBox] = {}
-        row.addLayout(self._motion_panel(), 1)
+    # ------------------------------------------------------- standard clip list
+    def refresh_standard(self) -> None:
+        overrides = {c["name"] for c in self._document()["clips"]}
+        off = set(self._motion_document().get("disabled", []))
+        self.stdlist.blockSignals(True)
+        self.stdlist.clear()
+        for name in sorted(BUILT_IN):
+            ru = CLIP_NAMES_RU.get(name, name)
+            note = " — заменено вашим" if name in overrides else ""
+            item = QListWidgetItem(f"{ru}  ({name}){note}")
+            item.setData(Qt.UserRole, name)
+            # Only the movements he randomly picks from - the dances - can be
+            # switched out of the pool; walk, idle and the like are structural.
+            if name in BUILT_IN_DANCES:
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked if name in off else Qt.Checked)
+            self.stdlist.addItem(item)
+        self.stdlist.blockSignals(False)
 
-        self.load_existing()
-        self.refresh_clips()
-        self.render()
+    def pick_standard(self, row: int) -> None:
+        if row < 0:
+            return
+        name = self.stdlist.item(row).data(Qt.UserRole)
+        self.builtin = name
+        self.keys = []
+        clip = CLIPS.get(name) or BUILT_IN.get(name)
+        if clip:
+            self.on_phase()
+        ru = CLIP_NAMES_RU.get(name, name)
+        self.status.setText(
+            f"«{ru}» — стандартное. «Проиграть» покажет его. "
+            "«Редактировать» разложит на ключи в «Мои движения»."
+        )
 
-    def _motion_panel(self) -> QVBoxLayout:
-        col = QVBoxLayout()
-        col.addWidget(QLabel("<b>Размеры стандартных движений</b>"))
-        col.addWidget(QLabel("Насколько крупное движение и как часто он его выбирает."))
-        grid = QGridLayout()
-        current = self._motion_document()
-        for i, (key, label) in enumerate(MOTION_LABELS.items()):
-            box = QDoubleSpinBox()
-            box.setRange(0.0, 400.0)
-            box.setKeyboardTracking(False)
-            box.setSingleStep(0.1 if key.startswith(("weight", "walk_s")) else 2.0)
-            box.setDecimals(2 if key.startswith(("weight", "walk_s")) else 0)
-            box.setValue(float(current.get(key, MOTION_DEFAULTS[key])))
-            self.motion_boxes[key] = box
-            grid.addWidget(QLabel(label), i, 0)
-            grid.addWidget(box, i, 1)
-        holder = QWidget()
-        holder.setLayout(grid)
-        col.addWidget(holder)
-        bar = QHBoxLayout()
-        for text, slot in (("Сохранить размеры", self.save_motion),
-                           ("Сбросить всё к стандарту", self.reset_motion)):
-            b = QPushButton(text)
-            b.clicked.connect(slot)
-            bar.addWidget(b)
-        col.addLayout(bar)
-        self.motion_status = QLabel("Применится при следующем запуске.")
-        self.motion_status.setWordWrap(True)
-        col.addWidget(self.motion_status)
-        col.addStretch(1)
-        return col
+    def _toggle_enabled(self, item: QListWidgetItem) -> None:
+        """A checkbox went on or off: write the disabled set to motion.json now."""
+        name = item.data(Qt.UserRole)
+        doc = self._motion_document()
+        off = set(doc.get("disabled", []))
+        if item.checkState() == Qt.Unchecked:
+            off.add(name)
+        else:
+            off.discard(name)
+        doc["disabled"] = sorted(off)
+        self._write_motion(doc)
+        ru = CLIP_NAMES_RU.get(name, name)
+        state = "убрано из набора" if name in off else "вернулось в набор"
+        self.motion_status.setText(f"«{ru}» {state}. Применится при запуске.")
 
-    # -- the clip list -----------------------------------------------------
+    def fork_to_custom(self) -> None:
+        """Sample the selected standard clip into keyframes and switch to tab 2.
 
-    def refresh_clips(self) -> None:
-        """Everything he can do: the authored clips first, then the built-ins."""
-        mine = list(self._document()["clips"])
-        self.mine = [c["name"] for c in mine]
-        built_in = [n for n in sorted(CLIPS) if n not in self.mine]
+        A built-in clip is a function of phase, so there is nothing to hand a
+        keyframe editor - but it can be sampled. The result keeps the name, which
+        is what makes saving it replace the standard one.
+        """
+        name = self.builtin
+        clip = BUILT_IN.get(name)
+        if clip is None:
+            self.status.setText("выберите стандартное движение в списке слева")
+            return
+        self.keys = [
+            values_to_key(spec_to_values(clip.at(clip.duration * i / FORK_KEYS)),
+                          i / FORK_KEYS)
+            for i in range(FORK_KEYS)
+        ]
+        self.name.setText(name)
+        self.duration.setValue(clip.duration)
+        self.tabs.setCurrentIndex(1)
+        self.cliplist.setCurrentRow(-1)
+        self.refresh_keys()
+        self.load_key(0)
+        ru = CLIP_NAMES_RU.get(name, name)
+        self.status.setText(
+            f"«{ru}» разложено на {FORK_KEYS} ключей. Правьте и сохраните — "
+            "оно заменит стандартное."
+        )
+
+    def revert_builtin(self) -> None:
+        """Drop an override so the standard movement comes back."""
+        name = self.builtin
+        if not name:
+            self.status.setText("выберите стандартное движение в списке слева")
+            return
+        doc = self._document()
+        if not any(c.get("name") == name for c in doc["clips"]):
+            self.status.setText(f"«{name}» и так стандартное — заменять нечем")
+            return
+        doc["clips"] = [c for c in doc["clips"] if c.get("name") != name]
+        self._write_poses(doc)
+        self.refresh_standard()
+        self.refresh_mine()
+        self.status.setText(f"«{name}»: стандартное вернулось.")
+        self.saved.emit(name)
+
+    # ----------------------------------------------------------- my clip list
+    def refresh_mine(self) -> None:
+        self.mine = [c["name"] for c in self._document()["clips"]]
         self.cliplist.blockSignals(True)
         self.cliplist.clear()
         for name in self.mine:
-            tag = "своё, заменяет стандартное" if name in BUILT_IN else "своё"
-            self.cliplist.addItem(QListWidgetItem(f"{name}   ({tag})"))
-        for name in built_in:
-            self.cliplist.addItem(QListWidgetItem(f"{name}   (стандартное)"))
+            tag = " (заменяет стандартное)" if name in BUILT_IN else ""
+            self.cliplist.addItem(QListWidgetItem(f"{name}{tag}"))
         self.cliplist.blockSignals(False)
 
-    def pick_clip(self, row: int) -> None:
-        if row < 0:
+    def pick_mine(self, row: int) -> None:
+        if not (0 <= row < len(self.mine)):
             return
-        if row < len(self.mine):
-            for clip in self._document()["clips"]:
-                if clip["name"] == self.mine[row]:
-                    self.name.setText(clip["name"])
-                    self.duration.setValue(float(clip.get("duration", 1.6)))
-                    self.keys = list(clip.get("keys", []))
-                    self.refresh_keys()
-                    self.load_key(0)
-                    return
-        else:
-            name = self.cliplist.item(row).text().split()[0]
-            clip = BUILT_IN.get(name) or CLIPS.get(name)
-            if clip:
-                self.builtin = name
-                self.keys = []
-                self.name.setText(name)
-                self.duration.setValue(clip.duration)
+        for clip in self._document()["clips"]:
+            if clip["name"] == self.mine[row]:
+                self.builtin = ""
+                self.name.setText(clip["name"])
+                self.duration.setValue(float(clip.get("duration", 1.6)))
+                self.keys = list(clip.get("keys", []))
                 self.refresh_keys()
-                self.on_phase()
-                self.status.setText(
-                    f"«{name}» — стандартное. Проигрывается кнопкой «Проиграть». "
-                    "Чтобы менять — «Взять как основу»: оно разложится на ключи."
-                )
-
-    def _selected_clip(self):
-        """What Play should play: the keys if there are any, else the built-in."""
-        if len(self.keys) >= 2:
-            return self._clip()
-        return BUILT_IN.get(self.builtin) or CLIPS.get(self.builtin)
-
-    def fork_builtin(self) -> None:
-        """Turn the selected standard movement into keyframes you can edit.
-
-        Built-in clips are functions of phase, so there is nothing to hand to a
-        keyframe editor - but they can be sampled. The result carries the same
-        name, which is what makes it *replace* the standard one when saved, and
-        what makes "Вернуть стандартное" put the original back by deleting it.
-        """
-        name = self.builtin or (self.name.text() or "").strip()
-        clip = BUILT_IN.get(name)
-        if clip is None:
-            self.status.setText("выберите стандартное движение в списке")
-            return
-        self.keys = []
-        for i in range(FORK_KEYS):
-            phase = i / FORK_KEYS
-            self.keys.append(values_to_key(spec_to_values(clip.at(clip.duration * phase)),
-                                           phase))
-        self.name.setText(name)
-        self.duration.setValue(clip.duration)
-        self.refresh_keys()
-        self.load_key(0)
-        self.status.setText(
-            f"«{name}» разложено на {FORK_KEYS} ключей. Правьте и сохраняйте — "
-            "оно заменит стандартное. «Вернуть стандартное» отменит замену."
-        )
+                self.load_key(0)
+                return
 
     def new_clip(self) -> None:
-        """Start a fresh clip rather than editing whatever was loaded."""
         self.builtin = ""
         self.keys = []
-        self.name.setText("my_dance")
+        self.name.setText("moy_tanec")
         self.duration.setValue(1.6)
         self.phase.setValue(0)
         self.reset()
@@ -403,62 +503,24 @@ class PoseEditor(QDialog):
         self.refresh_keys()
 
     def delete_clip(self) -> None:
-        """Remove an authored clip. Two buttons, one job.
-
-        Deleting your own movement and putting a standard one back are the same
-        operation - both drop an entry from poses.json - but they are not the same
-        intention, and one label cannot describe both. Hence two buttons.
-        """
         name = (self.name.text() or "").strip()
         doc = self._document()
         if not any(c.get("name") == name for c in doc["clips"]):
-            self.status.setText(
-                f"«{name}» нет среди ваших движений — удалять нечего. "
-                "Выберите своё движение в списке."
-            )
+            self.status.setText(f"«{name}» нет среди ваших — выберите своё в списке")
             return
         doc["clips"] = [c for c in doc["clips"] if c.get("name") != name]
-        try:
-            self.poses_file.write_text(
-                json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-            )
-        except OSError as exc:
-            self.status.setText(f"не удалось записать {self.poses_file}: {exc}")
+        if not self._write_poses(doc):
             return
         back = " Стандартное вернулось." if name in BUILT_IN else ""
-        # after new_clip(), because that resets the keys and rewrites the status
         self.new_clip()
-        self.refresh_clips()
+        self.refresh_mine()
+        self.refresh_standard()
         self.status.setText(
-            f"«{name}» удалено. Своих движений осталось: {len(doc['clips'])}.{back}"
+            f"«{name}» удалено. Своих осталось: {len(doc['clips'])}.{back}"
         )
         self.saved.emit(name)
 
-    # -- the motion file ---------------------------------------------------
-
-    def _motion_document(self) -> dict:
-        path = self.poses_file.with_name("motion.json")
-        try:
-            doc = json.loads(path.read_text())
-            return doc if isinstance(doc, dict) else {}
-        except (OSError, ValueError):
-            return {}
-
-    def reset_motion(self) -> None:
-        for key, box in self.motion_boxes.items():
-            box.setValue(float(MOTION_DEFAULTS[key]))
-
-    def save_motion(self) -> None:
-        path = self.poses_file.with_name("motion.json")
-        doc = {k: round(b.value(), 2) for k, b in self.motion_boxes.items()}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(doc, indent=2) + "\n")
-        self.motion_status.setText(
-            f"записано в {path.name}. Применится при следующем запуске."
-        )
-
-    # -- values ------------------------------------------------------------
-
+    # ------------------------------------------------------------- the pose
     def values(self) -> dict[str, float]:
         return {n: float(s.value()) for n, s in self.sliders.items()}
 
@@ -478,8 +540,7 @@ class PoseEditor(QDialog):
     def on_slider(self) -> None:
         self.render()
 
-    # -- preview -----------------------------------------------------------
-
+    # ------------------------------------------------------------- preview
     def render(self, spec: PoseSpec | None = None) -> None:
         from tools.rig_editor import pil_to_qpixmap
 
@@ -489,17 +550,23 @@ class PoseEditor(QDialog):
         flat.alpha_composite(img)
         self.preview.setPixmap(pil_to_qpixmap(flat))
 
+    def _preview_clip(self):
+        """What Play and the phase slider show, depending on the active tab."""
+        if self.tabs.currentIndex() == 0 and self.builtin:
+            return CLIPS.get(self.builtin) or BUILT_IN.get(self.builtin)
+        if len(self.keys) >= 2:
+            return self._clip()
+        return None
+
     def on_phase(self) -> None:
-        """Scrubbing shows the clip so far, so you can key against what is there."""
-        clip = self._selected_clip()
-        if clip is None:
-            return
-        self.render(clip.at(clip.duration * self.phase.value() / 100.0))
+        clip = self._preview_clip()
+        if clip is not None:
+            self.render(clip.at(clip.duration * self.phase.value() / 100.0))
 
     def play(self) -> None:
-        clip = self._selected_clip()
+        clip = self._preview_clip()
         if clip is None:
-            self.status.setText("нечего проигрывать — поставьте два ключа")
+            self.status.setText("нечего проигрывать — выберите движение или поставьте ключи")
             return
         from PySide6.QtCore import QEventLoop, QTimer
 
@@ -516,8 +583,7 @@ class PoseEditor(QDialog):
             "keys": self.keys,
         })
 
-    # -- keyframes ---------------------------------------------------------
-
+    # ------------------------------------------------------------- keyframes
     def refresh_keys(self) -> None:
         self.keylist.clear()
         for k in self.keys:
@@ -553,33 +619,63 @@ class PoseEditor(QDialog):
             self.phase.blockSignals(False)
             self.set_values(key_to_values(self.keys[row]))
 
-    # -- the file ----------------------------------------------------------
-
+    # ------------------------------------------------------------- the files
     def _document(self) -> dict:
         if self.poses_file.exists():
             try:
-                doc = json.loads(self.poses_file.read_text())
+                doc = json.loads(self.poses_file.read_text(encoding="utf-8"))
                 if isinstance(doc.get("clips"), list):
                     return doc
             except (OSError, ValueError):
                 pass
         return {"clips": []}
 
-    def load_existing(self) -> None:
-        clips = self._document()["clips"]
-        if not clips:
-            self.refresh_keys()
-            return
-        first = clips[0]
-        self.name.setText(str(first.get("name", "my_dance")))
-        self.duration.setValue(float(first.get("duration", 1.6)))
-        self.keys = list(first.get("keys", []))
-        self.refresh_keys()
+    def _write_poses(self, doc: dict) -> bool:
+        try:
+            self.poses_file.parent.mkdir(parents=True, exist_ok=True)
+            self.poses_file.write_text(
+                json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
+            return True
+        except OSError as exc:
+            self.status.setText(f"не удалось записать {self.poses_file}: {exc}")
+            return False
+
+    def _motion_document(self) -> dict:
+        try:
+            doc = json.loads(self.motion_file.read_text(encoding="utf-8"))
+            return doc if isinstance(doc, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _write_motion(self, doc: dict) -> None:
+        try:
+            self.motion_file.parent.mkdir(parents=True, exist_ok=True)
+            self.motion_file.write_text(
+                json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            self.motion_status.setText(f"не удалось записать {self.motion_file}: {exc}")
+
+    def reset_motion(self) -> None:
+        for key, box in self.motion_boxes.items():
+            box.blockSignals(True)
+            box.setValue(float(MOTION_DEFAULTS[key]))
+            box.blockSignals(False)
+        self.motion_status.setText("Значения возвращены к стандарту. Нажмите «Сохранить».")
+
+    def save_motion(self) -> None:
+        doc = self._motion_document()   # keep the disabled set the checkboxes wrote
+        doc.update({k: round(b.value(), 2) for k, b in self.motion_boxes.items()})
+        self._write_motion(doc)
+        self.motion_status.setText(
+            f"записано в {self.motion_file.name}. Применится при следующем запуске."
+        )
 
     def save(self) -> None:
         name = (self.name.text() or "").strip()
-        if not name.replace("_", "").isalnum():
-            self.status.setText("простое имя: буквы, цифры, подчёркивания")
+        if not name or not all(c.isalnum() or c == "_" for c in name):
+            self.status.setText("имя: буквы, цифры и подчёркивания")
             return
         if len(self.keys) < 2:
             self.status.setText("нужно минимум два ключа")
@@ -591,10 +687,9 @@ class PoseEditor(QDialog):
             self.status.setText(str(exc))
             return
 
-        # When this clip replaces a standard one, it has to keep what the standard
-        # one did beyond its shape: how fast it carries him across the screen, and
-        # whether it counts as a dance or as getting-about. A walk with no speed
-        # walks on the spot - which is exactly the bug this guards against.
+        # A clip that replaces a standard one keeps what the standard one did
+        # beyond its shape: its travel speed and whether it is a dance. A walk with
+        # no speed walks on the spot.
         original = BUILT_IN.get(name)
         doc = self._document()
         doc["clips"] = [c for c in doc["clips"] if c.get("name") != name]
@@ -608,13 +703,12 @@ class PoseEditor(QDialog):
         if original and original.speed:
             clip["speed"] = round(original.speed, 6)
         doc["clips"].append(clip)
-        self.poses_file.parent.mkdir(parents=True, exist_ok=True)
-        self.poses_file.write_text(
-            json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
-        self.refresh_clips()
+        if not self._write_poses(doc):
+            return
+        self.refresh_mine()
+        self.refresh_standard()
         self.status.setText(
-            f"записано в {self.poses_file.name}, своих движений: {len(doc['clips'])}. "
+            f"«{name}» сохранено, своих движений: {len(doc['clips'])}. "
             "Применится при следующем запуске."
         )
         self.saved.emit(name)

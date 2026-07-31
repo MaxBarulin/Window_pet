@@ -207,15 +207,17 @@ limb and the automatic radius comes out shy.
 
 ### Everything he can do, and how much of it
 
-The pose editor lists every clip he has, yours first and the built-in ones after.
-Selecting any of them plays it. A built-in one cannot be keyframed directly — it
-is a function of phase, not a list of poses — but **Взять как основу** samples it
-into eight keyframes carrying the same name, and saving that *replaces* the
-standard one. **Вернуть стандартное** deletes the override and the original comes
-back, so nothing is ever lost by experimenting.
+The movements window has two tabs. **Стандартные** lists the built-in movements:
+each dance has a checkbox that takes it in or out of the pool he picks from — turn
+one off and your own come up in its place — and any of them can be played,
+retuned, or **Редактировать**'d, which samples it into eight keyframes on the
+**Мои движения** tab. Saving that under the same name replaces the standard one;
+**Вернуть стандартное** drops the override and the original is back, so
+experimenting loses nothing. **Мои движения** is the keyframe editor: create,
+edit, delete, save.
 
-Its size and how often he picks it are separate knobs on the right of that
-window, written to `assets/motion.json`:
+The size and frequency knobs are on the Стандартные tab, grouped by movement, and
+written to `assets/motion.json`:
 
 | Knob | What it changes |
 | --- | --- |
@@ -224,7 +226,9 @@ window, written to `assets/motion.json`:
 | kazachok depth and kick reach | How low the squat dance sits and how far the kick shoots |
 | how often: walk / dance / stand / crouch / hop | What he picks when he is stood on something |
 
-The editor windows are in Russian; the code and this file are not.
+The editor windows are in Russian; the code and this file are not. Clip names,
+reminder text and everything else the editors write are UTF-8, read back as UTF-8
+so Cyrillic survives on Windows too.
 
 A missing or broken `motion.json` simply means the defaults.
 

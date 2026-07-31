@@ -91,7 +91,7 @@ def load_motion() -> dict:
     """Read assets/motion.json. Anything wrong with it means the defaults."""
     out = dict(MOTION_DEFAULTS)
     try:
-        raw = json.loads((_assets_dir() / "motion.json").read_text())
+        raw = json.loads((_assets_dir() / "motion.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return out
     for key, default in MOTION_DEFAULTS.items():
@@ -650,10 +650,25 @@ def load_clips(path) -> dict[str, Clip]:
     if not path.exists():
         return {}
     try:
-        doc = json.loads(path.read_text())
+        # utf-8 explicitly: the file is written utf-8, and Windows would otherwise
+        # read it in the locale codepage and turn Cyrillic names into mojibake.
+        doc = json.loads(path.read_text(encoding="utf-8"))
         return {c["name"]: keyframe_clip(c) for c in doc.get("clips", [])}
     except (OSError, ValueError, KeyError, TypeError):
         return {}
+
+
+def disabled_clips() -> set[str]:
+    """Standard movements the user has switched off, from assets/motion.json.
+
+    A disabled clip is dropped from the pool he picks dances from, so his own
+    movements come up in its place.
+    """
+    try:
+        raw = json.loads((_assets_dir() / "motion.json").read_text(encoding="utf-8"))
+        return set(raw.get("disabled", [])) if isinstance(raw, dict) else set()
+    except (OSError, ValueError):
+        return set()
 
 
 def register(clips: dict[str, Clip], dances: list[str] | None = None) -> None:
@@ -671,9 +686,15 @@ DANCES: tuple[str, ...] = _BUILT_IN_DANCES
 _custom = load_clips(assets_dir() / "poses.json")
 if _custom:
     _doc_names = [c["name"] for c in
-                  json.loads((assets_dir() / "poses.json").read_text())["clips"]
+                  json.loads((assets_dir() / "poses.json").read_text(encoding="utf-8"))["clips"]
                   if c.get("dance", True)]
     register(_custom, _doc_names)
+
+# Standard movements switched off in the editor leave the dance pool, so his own
+# come up instead. Done last, after custom clips have joined.
+_off = disabled_clips()
+if _off:
+    DANCES = tuple(n for n in DANCES if n not in _off)
 
 
 def random_dance(rng: random.Random | None = None) -> str:
